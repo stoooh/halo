@@ -304,7 +304,7 @@ fn pdf_redact(input: &Path, out: &Path, w: What, terms: &[String]) -> Result<(),
 
 /// Le parti di un .docx che contengono testo: corpo, intestazioni, piè di pagina, note, commenti.
 fn docx_parts(input: &Path) -> Result<(Vec<String>, Vec<(String, String)>), String> {
-    let list = run_cmd("7z", &["l", "-slt", &s(input)])?;
+    let list = crate::actions::seven_list(input)?;
     let re = Regex::new(r"^word/(document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$").unwrap();
     let names: Vec<String> = list.lines().filter_map(|l| l.strip_prefix("Path = ")).filter(|p| re.is_match(p)).map(|p| p.to_string()).collect();
     if names.is_empty() { return Err("Il file non sembra un documento Word valido.".into()); }

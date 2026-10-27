@@ -207,7 +207,7 @@ mod tests {
         let d = |k: &str, v: &str| HashMap::from([(k.to_string(), v.to_string())]);
 
         assert_eq!(run(&files, "multi/insieme/zip", &HashMap::new()).unwrap(), "Creato: Bozza e altri 2.zip (3 file)");
-        let list = run_cmd("7z", &["l", "-slt", &s(&dir.join("Bozza e altri 2.zip"))]).unwrap();
+        let list = crate::actions::seven_list(&dir.join("Bozza e altri 2.zip")).unwrap();
         assert!(list.contains("Path = Bozza.txt") && list.contains("Path = cartella/c.txt") || list.contains("Path = cartella"), "{}", list);
 
         assert_eq!(run(&files, "multi/insieme/rinomina-in-serie", &d("valore", "Note")).unwrap(), "Creato: Note (3 copie rinominate)");
@@ -239,7 +239,7 @@ mod tests {
         run_cmd("convert", &["-size", "3000x2000", "plasma:fractal", &s(&foto)]).unwrap();
         let r = run(&[foto.clone(), a.clone()], "multi/insieme/per-email", &HashMap::new()).unwrap();
         assert!(r.starts_with("Creato: grande e altri 1_email.zip (2 file, 1 alleggeriti:"), "{}", r);
-        let list = run_cmd("7z", &["l", "-slt", &s(&dir.join("grande e altri 1_email.zip"))]).unwrap();
+        let list = crate::actions::seven_list(&dir.join("grande e altri 1_email.zip")).unwrap();
         assert!(list.contains("Path = grande.jpg") && list.contains("Path = Bozza.txt"), "{}", list);
         assert!(foto.exists());
 

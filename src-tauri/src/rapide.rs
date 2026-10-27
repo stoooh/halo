@@ -78,7 +78,7 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
             Ok(format!("Creato: {} ({} {} su {})", name(&out), got, if got == 1 { "pagina" } else { "pagine" }, n))
         }
         "archive/anteprima/dimensioni" => {
-            let list = run_cmd("7z", &["l", "-slt", &i])?;
+            let list = crate::actions::seven_list(input)?;
             let (mut files, mut size) = (0u64, 0u64);
             for block in list.split("\n\n").filter(|b| b.contains("\nPath = ") || b.starts_with("Path = ")) {
                 if block.lines().any(|l| l == "Folder = +") || !block.contains("Size = ") { continue; }
@@ -94,7 +94,7 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
         "archive/anteprima/cerca" => {
             if valore.is_empty() { return Err("Scrivi cosa cercare.".into()); }
             let q = valore.to_lowercase();
-            let list = run_cmd("7z", &["l", "-slt", &i])?;
+            let list = crate::actions::seven_list(input)?;
             let found: Vec<&str> = list.lines().filter_map(|l| l.strip_prefix("Path = ")).skip(1)
                 .filter(|p| p.rsplit('/').next().unwrap_or(p).to_lowercase().contains(&q)).collect();
             if found.is_empty() { return Ok(format!("Nessun file dell'archivio contiene «{}» nel nome.", valore)); }

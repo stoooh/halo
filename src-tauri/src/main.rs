@@ -44,6 +44,18 @@ struct Target {
     kind: String,
 }
 
+impl Target {
+    /// Il file passato sulla riga di comando, se esiste.
+    fn of(arg: &str) -> Option<Target> {
+        let abs = sistema::absolute(Path::new(arg))?;
+        Some(Target {
+            name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            kind: actions::kind_of(&abs).to_string(),
+            path: abs.to_string_lossy().into_owned(),
+        })
+    }
+}
+
 /// Il file su cui aprire il menu: il primo dei file passati.
 #[tauri::command]
 fn target_file() -> Option<Target> {
@@ -59,12 +71,7 @@ fn target_files() -> Vec<Target> {
         Some(k) => args[k + 1..].to_vec(),
         None => args.into_iter().filter(|a| !a.starts_with('-')).collect(),
     };
-    let mut v: Vec<Target> = files.into_iter().filter_map(|a| std::fs::canonicalize(Path::new(&a)).ok())
-        .map(|abs| Target {
-            name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-            kind: actions::kind_of(&abs).to_string(),
-            path: abs.to_string_lossy().into_owned(),
-        }).collect();
+    let mut v: Vec<Target> = files.iter().filter_map(|a| Target::of(a)).collect();
     for e in EXTRA.lock().unwrap().iter() {
         if !v.iter().any(|x| x.path == e.path) { v.push(e.clone()); }
     }
@@ -262,8 +269,29 @@ fn place_on_cursor(app: &tauri::App) {
             if p.0 >= 0.0 && p.1 >= 0.0 { *START_POS.lock().unwrap() = Some(p); }
         }
     }
+    no_menu_alt(&w);
     let _ = w.show();
     let _ = w.set_focus();
+}
+
+/// Windows: Alt premuto da solo attiverebbe il menu di sistema della finestra, che senza bordi
+/// non si vede: la finestra resterebbe bloccata finché non si preme un altro tasto.
+#[cfg(windows)]
+fn no_menu_alt(w: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+    use windows::Win32::UI::WindowsAndMessaging::{SC_KEYMENU, WM_SYSCOMMAND};
+    unsafe extern "system" fn proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, _dati: usize) -> LRESULT {
+        if msg == WM_SYSCOMMAND && (wp.0 & 0xFFF0) as u32 == SC_KEYMENU {
+            return LRESULT(0);
+        }
+        DefSubclassProc(h, msg, wp, lp)
+    }
+    if let Ok(h) = w.hwnd() {
+        unsafe {
+            let _ = SetWindowSubclass(h, Some(proc), 1, 0);
+        }
+    }
 }
 
 /// Avanzamento del lavoro in corso (0–1), se il programma lo dice.
@@ -343,14 +371,14 @@ async fn run_action(path: String, key: String, data: Option<HashMap<String, Stri
 fn main() {
     configura::migrate_from_fulcro();
     // Configurazione all'accesso (autostart del pacchetto): niente finestra.
-    // Windows: processo in ascolto dell'Alt+clic (avviato all'accesso), senza finestre.
+    if std::env::args().any(|a| a == "--configura") {
+        println!("{}", configura::run());
+        return;
+    }
+    // Windows: ascolto dell'Alt+clic in sottofondo (avvio all'accesso), niente finestra.
     #[cfg(windows)]
     if std::env::args().any(|a| a == "--residente") {
         altclic_win::run();
-        return;
-    }
-    if std::env::args().any(|a| a == "--configura") {
-        println!("{}", configura::run());
         return;
     }
     let builder = tauri::Builder::default();
@@ -358,11 +386,7 @@ fn main() {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
         // Un'altra istanza (stessa selezione in Esplora file): i suoi file si aggiungono a questa.
         use tauri::Emitter;
-        let files: Vec<Target> = argv.iter().skip(1).filter(|a| !a.starts_with('-'))
-            .filter_map(|a| std::fs::canonicalize(Path::new(a)).ok())
-            .map(|abs| Target { name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                kind: actions::kind_of(&abs).to_string(), path: abs.to_string_lossy().into_owned() })
-            .collect();
+        let files: Vec<Target> = argv.iter().skip(1).filter(|a| !a.starts_with('-')).filter_map(|a| Target::of(a)).collect();
         if !files.is_empty() {
             // Conservati anche qui: se arrivano prima che il menu sia pronto, li legge target_files.
             EXTRA.lock().unwrap().extend(files.iter().cloned());

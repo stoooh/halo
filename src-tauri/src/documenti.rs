@@ -38,7 +38,7 @@ fn need_ooxml(input: &Path, key: &str) -> Result<(), String> {
 
 /// Nomi delle parti dentro il file Office.
 pub(crate) fn parts(input: &Path) -> Result<Vec<String>, String> {
-    Ok(run_cmd("7z", &["l", "-slt", &s(input)])?.lines().filter_map(|l| l.strip_prefix("Path = ")).skip(1).map(|p| p.to_string()).collect())
+    Ok(crate::actions::seven_list(input)?.lines().filter_map(|l| l.strip_prefix("Path = ")).skip(1).map(|p| p.to_string()).collect())
 }
 
 pub(crate) fn read_part(input: &Path, part: &str) -> Result<String, String> {

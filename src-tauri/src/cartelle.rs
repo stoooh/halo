@@ -313,7 +313,8 @@ pub fn shot_names(files: &[PathBuf]) -> Vec<Option<String>> {
     let refs: Vec<&str> = args.iter().map(|a| a.as_str()).collect();
     let json: Vec<serde_json::Value> = run_cmd("exiftool", &refs).ok().and_then(|o| serde_json::from_str(&o).ok()).unwrap_or_default();
     files.iter().map(|f| {
-        let item = json.iter().find(|j| j["SourceFile"].as_str() == Some(&s(f)))?;
+        // Su Windows exiftool scrive i percorsi con «/»: Path li confronta senza badare al separatore.
+        let item = json.iter().find(|j| j["SourceFile"].as_str().map(Path::new) == Some(f.as_path()))?;
         ["DateTimeOriginal", "CreateDate", "MediaCreateDate"].iter().filter_map(|k| item[*k].as_str())
             // I video senza data scrivono «0000:00:00 00:00:00».
             .find(|v| v.len() == 19 && !v.starts_with("0000")).map(String::from)

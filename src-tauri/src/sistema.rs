@@ -22,6 +22,34 @@ pub fn cmd(name: &str) -> Command {
     c
 }
 
+/// Python 3 per uno script passato con `-c`, senza leggere variabili PYTHON* né moduli dalla
+/// cartella corrente. Su Linux `-I`; su Windows `-E -P`, perché `-I` escluderebbe anche le
+/// librerie installate con `pip install --user` (openpyxl, msoffcrypto-tool), e `-X utf8`,
+/// altrimenti i messaggi arrivano nella codifica di Windows e «» diventano illeggibili.
+pub fn python() -> Command {
+    let mut c = cmd("python3");
+    c.args(if cfg!(windows) { &["-E", "-P", "-X", "utf8"][..] } else { &["-I"][..] });
+    c
+}
+
+/// Il percorso assoluto di un file passato a Halo. Su Windows `canonicalize` scrive
+/// «\\?\C:\…», che alcuni programmi non capiscono (qpdf): diventa «C:\…» (e «\\server\…»).
+pub fn absolute(p: &Path) -> Option<PathBuf> {
+    let abs = fs::canonicalize(p).ok()?;
+    #[cfg(windows)]
+    {
+        let t = abs.to_string_lossy();
+        if let Some(rest) = t.strip_prefix(r"\\?\UNC\") { return Some(PathBuf::from(format!(r"\\{}", rest))); }
+        if let Some(rest) = t.strip_prefix(r"\\?\") { return Some(PathBuf::from(rest)); }
+    }
+    Some(abs)
+}
+
+/// Come si installa una libreria Python che manca.
+pub fn pip_hint(pkg: &str) -> String {
+    if cfg!(windows) { format!("py -m pip install --user {}", pkg) } else { format!("sudo apt install python3-{}", pkg) }
+}
+
 #[cfg(not(windows))]
 fn resolve(name: &str) -> (PathBuf, Vec<&'static str>) {
     match name {
@@ -40,7 +68,9 @@ fn resolve(name: &str) -> (PathBuf, Vec<&'static str>) {
         // ImageMagick 7: «magick» al posto di «convert» (che su Windows è un altro comando di sistema).
         "convert" => (find_program("magick").unwrap_or_else(|| "magick".into()), vec![]),
         "identify" => (find_program("magick").unwrap_or_else(|| "magick".into()), vec!["identify"]),
-        "gs" => (find_program("gswin64c").or_else(gs_dir).unwrap_or_else(|| "gswin64c".into()), vec![]),
+        "gs" => (find_program("gswin64c").or_else(|| versioned("gs\\gs", "bin\\gswin64c.exe")).unwrap_or_else(|| "gswin64c".into()), vec![]),
+        // L'installer di qpdf non lo aggiunge al PATH.
+        "qpdf" => (find_program("qpdf").or_else(|| versioned("qpdf ", "bin\\qpdf.exe")).unwrap_or_else(|| "qpdf".into()), vec![]),
         "7z" => (find_program("7z").or_else(|| pf("7-Zip\\7z.exe")).unwrap_or_else(|| "7z".into()), vec![]),
         "soffice" => (find_program("soffice").or_else(|| pf("LibreOffice\\program\\soffice.exe")).unwrap_or_else(|| "soffice".into()), vec![]),
         "pandoc" => (find_program("pandoc").or_else(|| pf("Pandoc\\pandoc.exe")).unwrap_or_else(|| "pandoc".into()), vec![]),
@@ -51,11 +81,16 @@ fn resolve(name: &str) -> (PathBuf, Vec<&'static str>) {
     }
 }
 
+/// Un programma in una cartella di Programmi che ha la versione nel nome, la più recente:
+/// `versioned("gs\\gs", "bin\\gswin64c.exe")` trova C:\Program Files\gs\gs10.xx\bin\gswin64c.exe,
+/// `versioned("qpdf ", "bin\\qpdf.exe")` C:\Program Files\qpdf 12.x\bin\qpdf.exe.
 #[cfg(windows)]
-fn gs_dir() -> Option<PathBuf> {
-    // C:\Program Files\gs\gs10.xx\bin\gswin64c.exe (la versione cambia).
-    let base = PathBuf::from(std::env::var("ProgramFiles").ok()?).join("gs");
-    let mut v: Vec<PathBuf> = fs::read_dir(base).ok()?.filter_map(|e| e.ok()).map(|e| e.path().join("bin\\gswin64c.exe")).filter(|p| p.is_file()).collect();
+fn versioned(prefix: &str, exe: &str) -> Option<PathBuf> {
+    let (sub, start) = prefix.rsplit_once('\\').unwrap_or(("", prefix));
+    let dir = PathBuf::from(std::env::var("ProgramFiles").ok()?).join(sub);
+    let mut v: Vec<PathBuf> = fs::read_dir(dir).ok()?.filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with(start))
+        .map(|e| e.path().join(exe)).filter(|p| p.is_file()).collect();
     v.sort();
     v.pop()
 }
@@ -379,6 +414,32 @@ pub fn installed_apps() -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Dove Halo trova i programmi esterni: `cargo test programmi -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn programmi() {
+        for p in ["convert", "gs", "qpdf", "pdftoppm", "ffmpeg", "ffprobe", "7z", "exiftool", "pandoc", "soffice", "tesseract", "python3"] {
+            let (prog, pre) = resolve(p);
+            println!("{:10} {} {}", p, prog.display(), pre.join(" "));
+        }
+    }
+
+    /// Il percorso che arriva dal menu del tasto destro funziona anche con qpdf.
+    #[test]
+    #[ignore]
+    fn percorsi_assoluti() {
+        let dir = std::env::temp_dir().join("halo-test-assoluti");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let pdf = dir.join("a.pdf");
+        crate::actions::run_cmd("convert", &["xc:white", &pdf.to_string_lossy()]).unwrap();
+        let abs = absolute(&dir.join(".").join("a.pdf")).unwrap();
+        assert!(!abs.to_string_lossy().starts_with(r"\\?\"), "{}", abs.display());
+        assert_eq!(abs, pdf);
+        let data = std::collections::HashMap::from([("password".to_string(), "Prova-1".to_string())]);
+        assert!(crate::actions::run_with(&abs.to_string_lossy(), "pdf/proteggi/password", &data).is_ok());
+    }
 
     #[test]
     fn utilita() {

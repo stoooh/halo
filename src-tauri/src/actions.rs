@@ -762,6 +762,8 @@ fn run_inner(path: &str, key: &str, data: &HashMap<String, String>) -> Result<St
         k if crate::traduci::KEYS.contains(&k) => Err("Traduci si usa dal pannello: scegli lo strumento e premi Apri.".into()),
         "image/converti/heic" => {
             // heif-enc legge JPEG e PNG; gli altri formati passano prima da un PNG temporaneo.
+            // Su Windows heif-enc non c'è e ImageMagick legge gli HEIC ma non li scrive.
+            if cfg!(windows) { return Err("Manca il codificatore HEIC: su Windows la conversione in HEIC non è ancora disponibile.".into()); }
             let out = planned()?;
             let tmp = std::env::temp_dir().join(format!("halo-heic-{}.png", std::process::id()));
             let src = if ["jpg", "jpeg", "png"].contains(&ext.as_str()) { input.clone() } else {
@@ -865,6 +867,17 @@ pub(crate) fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Elenco del contenuto di un archivio (`7z l -slt`), uguale sui due sistemi: su Windows 7-Zip
+/// va a capo con "\r\n" e separa le cartelle con "\", qui diventano "\n" e "/" come su Linux.
+pub(crate) fn seven_list(input: &Path) -> Result<String, String> {
+    let list = run_cmd("7z", &["l", "-slt", &s(input)])?;
+    if !cfg!(windows) { return Ok(list); }
+    Ok(list.lines().map(|l| match l.strip_prefix("Path = ") {
+        Some(p) => format!("Path = {}\n", p.replace('\\', "/")),
+        None => format!("{}\n", l),
+    }).collect())
+}
+
 /// Messaggio per un programma esterno che manca, con il comando per installarlo.
 pub(crate) fn missing(cmd: &str) -> String {
     if cfg!(windows) {
@@ -878,7 +891,7 @@ pub(crate) fn missing(cmd: &str) -> String {
 fn winget_for(cmd: &str) -> &'static str {
     match cmd {
         "convert" | "identify" | "magick" => "winget install ImageMagick.ImageMagick",
-        "gs" => "winget install ArtifexSoftware.GhostScript",
+        "gs" => "l'installer di https://ghostscript.com/releases/gsdnld.html",
         "qpdf" => "winget install QPDF.QPDF",
         "pdftotext" | "pdftoppm" | "pdfinfo" => "winget install oschwartz10612.Poppler",
         "ffmpeg" | "ffprobe" => "winget install Gyan.FFmpeg",
@@ -1541,20 +1554,23 @@ mod tests {
     }
 
     // ---------------- prova completa con i programmi veri ----------------
-    // Esegue ogni chiave di SUPPORTED su una copia di un file d'esempio in /tmp/halo-azioni
-    // e stampa la tabella "chiave → esito → file creato". Richiede i programmi del README:
+    // Esegue ogni chiave di SUPPORTED su una copia di un file d'esempio in halo-azioni (nella
+    // cartella temporanea: /tmp su Linux, %TEMP% su Windows) e stampa la tabella
+    // "chiave → esito → file creato". Richiede i programmi del README:
     //   cargo test tutte_le_azioni -- --ignored --nocapture
 
-    const ROOT: &str = "/tmp/halo-azioni";
+    fn root() -> PathBuf {
+        std::env::temp_dir().join("halo-azioni")
+    }
 
     fn sh(cmd: &str, args: &[&str]) {
         if let Err(e) = run_cmd(cmd, args) { panic!("campione non creato: {}", e); }
     }
 
-    /// Crea un file d'esempio per ogni tipo in ROOT/campioni.
+    /// Crea un file d'esempio per ogni tipo in halo-azioni/campioni.
     fn campioni() -> PathBuf {
-        let c = Path::new(ROOT).join("campioni");
-        let _ = fs::remove_dir_all(ROOT);
+        let c = root().join("campioni");
+        let _ = fs::remove_dir_all(root());
         fs::create_dir_all(&c).unwrap();
         let p = |n: &str| s(&c.join(n));
 
@@ -1662,11 +1678,11 @@ mod tests {
             if key.starts_with("video/sottotitoli/") { println!("| `{}` | non provata in automatico (whisper.cpp) | — |", key); continue; }
             if key.ends_with("/traduci") { println!("| `{}` | non provata in automatico (apre il browser) | — |", key); continue; }
             if *key == "folder/condividi/link" { println!("| `{}` | non provata in automatico (caricamento online) | — |", key); continue; }
-            let work = Path::new(ROOT).join(key.replace('/', "__"));
+            let work = root().join(key.replace('/', "__"));
             fs::create_dir_all(&work).unwrap();
             let src = c.join(campione_per(key));
             let input = work.join(campione_per(key));
-            sh("cp", &["-r", &s(&src), &s(&input)]);
+            crate::sistema::copy_all(&src, &input).unwrap();
             let prima = impronta(&input);
 
             let valore = match *key {
@@ -1728,7 +1744,7 @@ mod tests {
         assert!(falliti.is_empty(), "azioni fallite: {:?}", falliti);
 
         // Controlli sul contenuto dove "è stato creato un file" non basta.
-        let r = Path::new(ROOT);
+        let r = &root();
         let pdf = fs::read(r.join("pdf__metadati__rimuovi-tutti/documento_senza_metadati.pdf")).unwrap();
         assert!(!String::from_utf8_lossy(&pdf).contains("Mario Rossi"), "il PDF contiene ancora l'autore");
         for (dir, f) in [("image__metadati__rimuovi-posizione", "foto_senza_gps.jpg"), ("image__metadati__rimuovi-tutti", "foto_senza_metadati.jpg")] {
@@ -1842,7 +1858,7 @@ mod tests {
     #[test]
     #[ignore]
     fn password_sbagliate_e_mancanti() {
-        let dir = Path::new("/tmp/halo-azioni-pw").to_path_buf();
+        let dir = std::env::temp_dir().join("halo-azioni-pw");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let pdf = dir.join("p.pdf");

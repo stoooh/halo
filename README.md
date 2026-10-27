@@ -223,6 +223,10 @@ la configurazione in `src-tauri/tauri.windows.conf.json`.
 - **Menu del tasto destro:** l'installazione aggiunge «Azioni rapide (Halo)» su file, cartelle e
   sfondo delle cartelle (registro, `HKCU\Software\Classes`). Su Windows 11 è in «Mostra altre opzioni».
   Con più file selezionati, Halo li raccoglie in un solo menu.
+- **Alt+clic** su un file in Esplora file o sul desktop apre il menu, come su Ubuntu (su uno spazio
+  vuoto: la cartella; su uno dei file selezionati: tutti quelli selezionati). Lo ascolta
+  `halo --residente`, avviato a ogni accesso (`HKCU\...\CurrentVersion\Run`) e subito dopo
+  l'installazione; il codice è in `src-tauri/src/altclic_win.rs`.
 - **Programmi necessari** (una volta, da PowerShell):
 
 ```powershell
@@ -230,9 +234,6 @@ winget install ImageMagick.ImageMagick ArtifexSoftware.GhostScript QPDF.QPDF osc
 py -m pip install openpyxl msoffcrypto-tool
 ```
 
-- **Alt+clic:** come su Ubuntu, Alt+clic su un file in Esplora file o sul desktop apre Halo sotto il
-  puntatore (con più file selezionati, li apre tutti). Lo fa `halo --residente`, che parte a ogni
-  accesso senza finestre (`HKCU\…\Run`), registrato dall'installer.
 - **Non ancora disponibili su Windows:** Upscayl (Real-ESRGAN), l'elenco delle app in
   Condividi (restano Gmail, Link e «Mostra nella cartella»), OCR dei PDF (ocrmypdf).
 

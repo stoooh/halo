@@ -2,7 +2,7 @@
 //! Estrai › Solo alcuni, Contenuto › Rimuovi file, Sostituisci, Rinomina.
 //! L'archivio originale non viene mai toccato: si lavora su una copia.
 
-use crate::actions::{name, out_dir, out_path, run_cmd, s, seven_in};
+use crate::actions::{name, out_dir, out_path, s, seven_in};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,7 +16,7 @@ const MAX_ENTRIES: usize = 2000;
 
 /// I file (non le cartelle) contenuti nell'archivio, con la dimensione.
 pub fn entries(input: &Path) -> Result<Vec<(String, u64)>, String> {
-    let list = run_cmd("7z", &["l", "-slt", &s(input)]).map_err(|e| {
+    let list = crate::actions::seven_list(input).map_err(|e| {
         if e.contains("Can not open encrypted") || e.contains("Wrong password") { "L'archivio ha i nomi cifrati: toglila prima con Proteggi › Rimuovi password.".to_string() } else { e }
     })?;
     let mut out = Vec::new();
@@ -128,6 +128,7 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actions::run_cmd;
 
     #[test]
     #[ignore]

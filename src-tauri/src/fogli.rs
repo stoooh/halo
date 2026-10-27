@@ -52,9 +52,9 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
         stdin = format!("{}\n", pw);
     }
     let out = planned_out(input, key).ok_or("Opzione non disponibile.")?;
-    let child = crate::sistema::cmd("python3").args(["-I", "-c", SCRIPT, action, &s(input), &s(&out)])
+    let child = crate::sistema::python().args(["-c", SCRIPT, action, &s(input), &s(&out)])
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
-    let mut child = child.map_err(|_| "Manca Python 3. Installa con: sudo apt install python3".to_string())?;
+    let mut child = child.map_err(|_| crate::actions::missing("python3"))?;
     if let Some(mut si) = child.stdin.take() { let _ = si.write_all(stdin.as_bytes()); }
     let o = child.wait_with_output().map_err(|e| e.to_string())?;
     let stdout = String::from_utf8_lossy(&o.stdout);
@@ -67,8 +67,11 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
     }
     let _ = fs::remove_file(&out);
     if let Some(m) = last.strip_prefix("NO ") { return Err(m.to_string()); }
-    if stderr.contains("No module named 'openpyxl'") { return Err("Manca «python3-openpyxl». Installa con: sudo apt install python3-openpyxl".into()); }
-    if stderr.contains("No module named 'msoffcrypto'") { return Err("Manca «python3-msoffcrypto-tool». Installa con: sudo apt install python3-msoffcrypto-tool".into()); }
+    for (module, pkg) in [("openpyxl", "openpyxl"), ("msoffcrypto", "msoffcrypto-tool")] {
+        if stderr.contains(&format!("No module named '{}'", module)) {
+            return Err(format!("Manca la libreria Python «{}». Installa con: {}", pkg, crate::sistema::pip_hint(pkg)));
+        }
+    }
     Err(format!("Python non è riuscito: {}", stderr.lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("errore sconosciuto")))
 }
 
@@ -78,7 +81,7 @@ mod tests {
     use crate::actions::run_cmd;
 
     fn py(code: &str) -> String {
-        let o = crate::sistema::cmd("python3").args(["-I", "-c", code]).output().unwrap();
+        let o = crate::sistema::python().args(["-c", code]).output().unwrap();
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stdout).into_owned()
     }
