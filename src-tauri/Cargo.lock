@@ -1400,7 +1400,7 @@ dependencies = [
 
 [[package]]
 name = "halo"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "dirs 6.0.0",
@@ -1416,6 +1416,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
  "trash",
+ "windows-sys 0.60.2",
  "winreg 0.55.0",
 ]
 

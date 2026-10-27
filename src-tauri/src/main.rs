@@ -1,7 +1,12 @@
+// Su Windows niente finestra del terminale accanto all'app (nella versione finale).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 // Halo: menu radiale per azioni rapide sui file.
 // Avvio: `halo /percorso/del/file` (lo fa l'estensione di Nautilus).
 
 mod actions;
+#[cfg(windows)]
+mod altclic_win;
 mod annota;
 mod altri;
 mod archivi;
@@ -338,6 +343,12 @@ async fn run_action(path: String, key: String, data: Option<HashMap<String, Stri
 fn main() {
     configura::migrate_from_fulcro();
     // Configurazione all'accesso (autostart del pacchetto): niente finestra.
+    // Windows: processo in ascolto dell'Alt+clic (avviato all'accesso), senza finestre.
+    #[cfg(windows)]
+    if std::env::args().any(|a| a == "--residente") {
+        altclic_win::run();
+        return;
+    }
     if std::env::args().any(|a| a == "--configura") {
         println!("{}", configura::run());
         return;

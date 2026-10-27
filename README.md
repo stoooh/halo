@@ -230,6 +230,9 @@ winget install ImageMagick.ImageMagick ArtifexSoftware.GhostScript QPDF.QPDF osc
 py -m pip install openpyxl msoffcrypto-tool
 ```
 
-- **Non ancora disponibili su Windows:** Alt+clic, Upscayl (Real-ESRGAN), l'elenco delle app in
+- **Alt+clic:** come su Ubuntu, Alt+clic su un file in Esplora file o sul desktop apre Halo sotto il
+  puntatore (con più file selezionati, li apre tutti). Lo fa `halo --residente`, che parte a ogni
+  accesso senza finestre (`HKCU\…\Run`), registrato dall'installer.
+- **Non ancora disponibili su Windows:** Upscayl (Real-ESRGAN), l'elenco delle app in
   Condividi (restano Gmail, Link e «Mostra nella cartella»), OCR dei PDF (ocrmypdf).
 

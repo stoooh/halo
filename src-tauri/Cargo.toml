@@ -1,6 +1,6 @@
 [package]
 name = "halo"
-version = "0.8.0"
+version = "0.8.1"
 description = "Menu radiale per azioni rapide sui file"
 edition = "2021"
 
@@ -29,3 +29,5 @@ libc = "0.2"
 tauri-plugin-single-instance = "2"
 # Il PATH aggiornato dal registro (programmi appena installati).
 winreg = "0.55"
+# Alt+clic: hook del mouse di Windows.
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }

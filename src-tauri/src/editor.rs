@@ -104,15 +104,7 @@ pub fn preview(input: &Path, key: &str, page: usize, data: &HashMap<String, Stri
 }
 
 fn base64(b: &[u8]) -> String {
-    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut o = String::with_capacity(b.len().div_ceil(3) * 4);
-    for c in b.chunks(3) {
-        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
-        for k in 0..4 {
-            o.push(if k <= c.len() { T[(n >> (18 - 6 * k) & 63) as usize] as char } else { '=' });
-        }
-    }
-    o
+    crate::sistema::base64(b)
 }
 
 /// "x1,y1,x2,y2" in frazioni 0–1.

@@ -93,6 +93,17 @@ fn search_dirs() -> Vec<PathBuf> {
     v
 }
 
+/// Base64 standard (per i comandi codificati di PowerShell e le immagini nel pannello).
+pub fn base64(b: &[u8]) -> String {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut o = String::with_capacity(b.len().div_ceil(3) * 4);
+    for c in b.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for k in 0..4 { o.push(if k <= c.len() { T[(n >> (18 - 6 * k) & 63) as usize] as char } else { '=' }); }
+    }
+    o
+}
+
 /// Nome del programma con l'estensione del sistema («realesrgan-ncnn-vulkan.exe» su Windows).
 pub fn exe(name: &str) -> String {
     if cfg!(windows) { format!("{}.exe", name) } else { name.to_string() }
