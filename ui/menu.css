@@ -1,0 +1,224 @@
+:root {
+  --accent: #C2410C;
+  --accent-deep: #9F350A;
+  --ink: #2B1F17;
+  --muted: #5E4B3E;
+  /* Impostazioni › Vetro: moltiplica l'opacità dei pannelli (1 = come approvato). */
+  --glass-k: 1;
+  --tile: rgb(255 247 238 / calc(0.78 * var(--glass-k)));
+  --edge: rgba(255, 255, 255, 0.75);
+  --center: rgb(255 250 245 / calc(0.88 * var(--glass-k)));
+  --glass-strong: rgb(255 248 240 / calc(0.86 * var(--glass-k)));
+  --rim: rgba(255, 255, 255, 0.55);
+  --rim-hi: rgba(255, 255, 255, 0.85);
+  --focus: #0A5FD6;
+  --ok: #1F7A4D;
+  --err: #B42318;
+  --demo-bg: #E9784A;
+  /* Impostazioni › Grandezza del menu. */
+  --menu-scale: 1;
+}
+/* Tema scuro: automatico (dal sistema) oppure scelto nelle impostazioni (data-theme). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #F5EEE8;
+    --muted: #CFC3B8;
+    --tile: rgb(58 46 40 / calc(0.70 * var(--glass-k)));
+    --edge: rgba(255, 255, 255, 0.16);
+    --center: rgb(48 38 34 / calc(0.82 * var(--glass-k)));
+    --glass-strong: rgb(48 38 34 / calc(0.82 * var(--glass-k)));
+    --rim: rgba(255, 255, 255, 0.14);
+    --rim-hi: rgba(255, 255, 255, 0.22);
+    --focus: #7FB8FF;
+    --ok: #6FD39C;
+    --err: #FF8A80;
+    --demo-bg: #2A1A16;
+  }
+}
+:root[data-theme="dark"] {
+  --ink: #F5EEE8;
+  --muted: #CFC3B8;
+  --tile: rgb(58 46 40 / calc(0.70 * var(--glass-k)));
+  --edge: rgba(255, 255, 255, 0.16);
+  --center: rgb(48 38 34 / calc(0.82 * var(--glass-k)));
+  --glass-strong: rgb(48 38 34 / calc(0.82 * var(--glass-k)));
+  --rim: rgba(255, 255, 255, 0.14);
+  --rim-hi: rgba(255, 255, 255, 0.22);
+  --focus: #7FB8FF;
+  --ok: #6FD39C;
+  --err: #FF8A80;
+  --demo-bg: #2A1A16;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, Ubuntu, 'Cantarell', system-ui, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+body.demo { background: var(--demo-bg); }
+
+/* Sfondo d'esempio (solo nel browser, non nell'app) */
+.blob { position: fixed; border-radius: 50%; filter: blur(85px); pointer-events: none; }
+body:not(.demo) .blob, body:not(.demo) .tabs { display: none; }
+
+#backdrop { position: fixed; inset: 0; }
+
+#menu {
+  position: fixed; width: 460px; height: 460px;
+  transform: scale(var(--menu-scale));
+  transition: transform 320ms cubic-bezier(0.34, 1.4, 0.64, 1), opacity 180ms ease-out;
+}
+#menu.hidden { transform: scale(calc(0.86 * var(--menu-scale))); opacity: 0; pointer-events: none; }
+
+.ring { position: absolute; left: 20px; top: 20px; width: 420px; height: 420px; }
+/* Vetro sfocato sotto gli spicchi, ritagliato con la loro forma (maschera impostata da menu.js). */
+.ring .blur {
+  position: absolute; inset: 0; pointer-events: none;
+  backdrop-filter: blur(26px) saturate(180%); -webkit-backdrop-filter: blur(26px) saturate(180%);
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
+.ring > svg { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+/* Bordi e contorno di selezione seguono l'ingrandimento dello spicchio (centro del menu = 210, 210). */
+.ring > svg path { transform-box: view-box; transform-origin: 210px 210px; will-change: transform; transition: transform 220ms cubic-bezier(0.34, 1.4, 0.64, 1); }
+
+.wedge {
+  position: absolute; left: 0; top: 0; width: 420px; height: 420px;
+  margin: 0; padding: 0; border: 0; outline: none; background: transparent;
+  font: inherit; color: var(--ink); cursor: pointer;
+  transform-origin: 210px 210px;
+  /* Livello di composizione sempre pronto: niente bagliori all'inizio e alla fine dell'animazione. */
+  will-change: transform;
+  transition: color 140ms ease, transform 220ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.wedge.hot, .wedge.chosen { color: #FFFFFF; }
+/* Il colore dello spicchio (forma SVG dentro il pulsante). */
+.wedge > .wfill { position: absolute; left: 0; top: 0; pointer-events: none; }
+.wedge > .wfill path { fill: var(--tile); transition: fill 140ms ease; }
+.wedge.hot > .wfill path { fill: var(--accent); }
+.wedge.chosen > .wfill path { fill: var(--accent-deep); }
+.wedge .lab {
+  position: absolute; width: 108px; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 7px; pointer-events: none;
+  transition: transform 180ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.wedge.hot .lab, .wedge.chosen .lab { transform: translate(-50%, -50%) scale(1.03); }
+.wedge .t { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; line-height: 1.25; text-transform: uppercase; text-align: center; }
+.wedge .soon { font-size: 10px; font-weight: 500; letter-spacing: 0.04em; opacity: 0.8; }
+.wedge.todo:not(.hot) .lab > svg, .wedge.todo:not(.hot) .t { opacity: 0.55; }
+.dots { display: flex; gap: 3px; }
+.dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.55; }
+
+.center {
+  position: absolute; left: 152px; top: 152px; width: 156px; height: 156px;
+  margin: 0; padding: 0; border: 0; border-radius: 50%;
+  background: var(--center); color: var(--ink); font: inherit;
+  backdrop-filter: blur(26px) saturate(180%); -webkit-backdrop-filter: blur(26px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--rim-hi), inset 0 0 0 1px var(--rim), 0 10px 28px rgba(60, 20, 0, 0.18);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+}
+button.center { cursor: pointer; }
+.fname {
+  max-width: 128px; padding: 2px 7px; border-radius: 5px; background: #0A5FD6; color: #FFFFFF;
+  font-size: 12px; font-weight: 500; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.picon { width: 40px; height: 40px; border-radius: 12px; background: var(--accent); color: #FFFFFF; display: flex; align-items: center; justify-content: center; }
+.ptitle { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; max-width: 120px; text-align: center; line-height: 1.25; }
+.pchosen { min-height: 15px; font-size: 12px; font-weight: 500; color: var(--accent-deep); }
+.pback { display: flex; align-items: center; gap: 2px; font-size: 11.5px; font-weight: 500; color: var(--muted); }
+.spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--rim); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.state-ok { color: var(--ok); }
+.state-err { color: var(--err); }
+
+/* Pressione lunga sul centro (3 s) per le impostazioni: anello che si riempie. */
+.holdring { position: absolute; left: 146px; top: 146px; width: 168px; height: 168px; pointer-events: none; }
+.holdring[hidden] { display: none; }
+/* Il centro passa dal file scelto all'icona delle impostazioni durante la pressione. */
+.center > * { transition: opacity 220ms ease, transform 260ms cubic-bezier(0.34, 1.4, 0.64, 1); }
+.center.holding > * { opacity: 0; transform: scale(0.8); }
+.holdgear { position: absolute; left: 152px; top: 152px; width: 156px; height: 156px; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--accent);
+  opacity: 0; transform: scale(0.8); transition: opacity 220ms ease, transform 260ms cubic-bezier(0.34, 1.4, 0.64, 1); }
+.holdgear.on { opacity: 1; transform: scale(1); }
+.holdgear .hgicon { display: flex; }
+.holdgear .hglabel { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .center > *, .holdgear { transition: none; } }
+
+.toast {
+  position: absolute; left: 50%; top: 452px; transform: translateX(-50%);
+  width: max-content; max-width: 420px; padding: 10px 14px; border-radius: 14px;
+  background: var(--glass-strong); backdrop-filter: blur(26px) saturate(180%); -webkit-backdrop-filter: blur(26px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--rim-hi), inset 0 0 0 1px var(--rim), 0 10px 28px rgba(60, 20, 0, 0.2);
+  font-size: 13px; line-height: 1.45; white-space: pre-line; text-align: center;
+}
+.toast[hidden] { display: none; }
+
+.tabs {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  display: flex; gap: 2px; padding: 3px; border-radius: 14px; background: var(--glass-strong);
+  backdrop-filter: blur(28px) saturate(180%); -webkit-backdrop-filter: blur(28px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--rim-hi), inset 0 0 0 1px var(--rim), 0 8px 24px rgba(60, 20, 0, 0.18);
+}
+.tabs button {
+  min-height: 44px; padding: 0 13px; border: 0; border-radius: 11px; background: transparent;
+  color: var(--ink); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+}
+.tabs button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.9); font-weight: 600; box-shadow: 0 1px 3px rgba(60, 20, 0, 0.18); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tabs button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.18); } }
+:root[data-theme="dark"] .tabs button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.18); }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+@keyframes rm-in { from { transform: scale(0.62); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes rm-back { from { transform: scale(1.18); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.rm-in { animation: rm-in 340ms cubic-bezier(0.34, 1.36, 0.64, 1) both; }
+.rm-back { animation: rm-back 300ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.shake { animation: shake 220ms ease 2; }
+@media (prefers-reduced-motion: reduce) { .rm-in, .rm-back, .shake, .spinner { animation: none; } #menu, .wedge, .ring > svg path, .wedge > .wfill path { transition: none; } }
+
+/* Pulsante «Mostra nella cartella» dentro il messaggio del risultato. */
+.toast .tact { margin-top: 8px; min-height: 30px; padding: 0 12px; border: 0; border-radius: 9px; background: var(--accent);
+  color: #FFFFFF; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.toast .tact:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* «Ripeti»: l'ultima azione usata, sotto il nome del file al centro del menu. */
+.center .again { display: flex; align-items: center; gap: 4px; max-width: 128px; padding: 2px 6px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.center .again:hover { color: var(--accent-deep); background: var(--tile); }
+.center .again svg { flex: none; }
+.center .again:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* Cerca scrivendo: risultati sotto il menu, nel vetro del messaggio. */
+.search {
+  position: absolute; left: 50%; top: 452px; transform: translateX(-50%); width: 300px; padding: 8px; border-radius: 14px;
+  background: var(--glass-strong); backdrop-filter: blur(26px) saturate(180%); -webkit-backdrop-filter: blur(26px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--rim-hi), inset 0 0 0 1px var(--rim), 0 10px 28px rgba(60, 20, 0, 0.2);
+  display: flex; flex-direction: column; gap: 2px; font-size: 13px;
+}
+.search[hidden] { display: none; }
+.search .sq { padding: 2px 6px 6px; font-weight: 600; color: var(--ink); }
+.search .snone { padding: 4px 6px; color: var(--muted); }
+.search .sres { min-height: 32px; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: var(--ink);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.search .sres[aria-selected="true"] { background: var(--accent); color: #FFFFFF; font-weight: 600; }
+.search .sres:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Lavoro in corso: avanzamento e tempo, poi «Annulla» e «In sottofondo». */
+.center.busy { gap: 5px; }
+.center .jobline { font-size: 12px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+.center .jobbtns { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.center .jobbtn { min-height: 22px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--accent-deep);
+  font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.center .jobbtn:hover { background: var(--tile); }
+.center .jobbtn[hidden] { display: none; }
+.center .jobbtn:disabled { color: var(--muted); cursor: default; }
+.center .jobbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* Impostazioni › Animazioni › Ridotte (la rotellina di attesa resta). */
+:root.reduced *:not(.spinner) { transition: none !important; animation: none !important; }

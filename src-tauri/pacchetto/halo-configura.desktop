@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Halo (configurazione)
+Comment=Attiva l'Alt+clic di Halo dopo l'installazione o un aggiornamento
+Exec=halo --configura
+NoDisplay=true
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-enabled=true

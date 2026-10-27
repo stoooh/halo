@@ -1,0 +1,95 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Halo",
+  "version": "0.7.0",
+  "identifier": "dev.halo.menu",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Halo",
+        "maximized": true,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": true,
+        "shadow": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png"
+    ],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "halo.desktop",
+        "depends": [
+          "ffmpeg",
+          "imagemagick",
+          "ghostscript",
+          "qpdf",
+          "poppler-utils",
+          "7zip",
+          "libimage-exiftool-perl",
+          "pandoc",
+          "python3-openpyxl",
+          "python3-msoffcrypto-tool",
+          "libheif-examples",
+          "libheif-plugin-x265",
+          "wl-clipboard",
+          "curl",
+          "python3-nautilus",
+          "python3-gi",
+          "gir1.2-atspi-2.0",
+          "libnotify-bin",
+          "libreoffice-writer",
+          "libreoffice-calc",
+          "libreoffice-impress",
+          "ocrmypdf",
+          "tesseract-ocr-ita"
+        ],
+        "files": {
+          "/usr/share/gnome-shell/extensions/halo@halo.dev/extension.js": "../gnome-shell/halo@halo.dev/extension.js",
+          "/usr/share/gnome-shell/extensions/halo@halo.dev/metadata.json": "../gnome-shell/halo@halo.dev/metadata.json",
+          "/usr/share/gnome-shell/extensions/halo@halo.dev/halo-pick": "../gnome-shell/halo@halo.dev/halo-pick",
+          "/usr/share/nautilus-python/extensions/halo_nautilus.py": "../nautilus/halo_nautilus.py",
+          "/etc/xdg/autostart/halo-configura.desktop": "pacchetto/halo-configura.desktop",
+          "/usr/lib/halo/realesrgan/realesrgan-ncnn-vulkan": "risorse/realesrgan/realesrgan-ncnn-vulkan",
+          "/usr/lib/halo/realesrgan/models/realesrgan-x4plus.bin": "risorse/realesrgan/models/realesrgan-x4plus.bin",
+          "/usr/lib/halo/realesrgan/models/realesrgan-x4plus.param": "risorse/realesrgan/models/realesrgan-x4plus.param",
+          "/usr/lib/halo/realesrgan/models/realesrgan-x4plus-anime.bin": "risorse/realesrgan/models/realesrgan-x4plus-anime.bin",
+          "/usr/lib/halo/realesrgan/models/realesrgan-x4plus-anime.param": "risorse/realesrgan/models/realesrgan-x4plus-anime.param",
+          "/usr/lib/halo/realesrgan/LICENSE-Real-ESRGAN.txt": "risorse/realesrgan/LICENSE-Real-ESRGAN.txt",
+          "/usr/lib/halo/realesrgan/LICENSE-ncnn-vulkan.txt": "risorse/realesrgan/LICENSE-ncnn-vulkan.txt",
+          "/usr/lib/halo/realesrgan/PROVENIENZA.txt": "risorse/realesrgan/PROVENIENZA.txt"
+        },
+        "postInstallScript": "pacchetto/postinst.sh",
+        "recommends": [
+          "whisper.cpp"
+        ],
+        "conflicts": [
+          "fulcro"
+        ],
+        "replaces": [
+          "fulcro"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,245 @@
+#!/usr/bin/python3 -I
+# Trova il file sotto il puntatore in una finestra di Nautilus o sul desktop (Desktop Icons NG)
+# leggendo l'albero di accessibilità (AT-SPI), poi apre Halo su quel file.
+# Se sotto il puntatore non c'è un file, usa la cartella della finestra.
+#
+# La lancia l'estensione di GNOME Shell all'Alt+clic:
+#   halo-pick --app nautilus|desktop --title TITOLO [--window-path PERCORSO_DBUS] --x X --y Y
+#               [--menu-x MX --menu-y MY] [--dry-run]
+# X e Y sono relativi alla finestra; MX e MY all'area di lavoro del monitor (dove aprire il menu).
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import time
+from urllib.parse import unquote, urlparse
+
+import gi
+gi.require_version('Atspi', '2.0')
+from gi.repository import Atspi, Gio, GLib
+
+# Suffissi che Nautilus e Desktop Icons aggiungono al nome accessibile del file.
+SUFFIXES = ('. File', '. Folder', ' Selected', ' File', ' Folder')
+APPS = {'nautilus': ('org.gnome.Nautilus', 'nautilus'), 'desktop': ('gjs', 'ding')}
+
+
+def nautilus_folder(window_path):
+    """La cartella aperta nella finestra di Nautilus indicata (o nell'unica aperta)."""
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        r = bus.call_sync('org.freedesktop.FileManager1', '/org/freedesktop/FileManager1',
+                          'org.freedesktop.DBus.Properties', 'Get',
+                          GLib.Variant('(ss)', ('org.freedesktop.FileManager1', 'OpenWindowsWithLocations')),
+                          GLib.VariantType('(v)'), Gio.DBusCallFlags.NONE, 2000, None)
+        locs = r.unpack()[0]
+    except GLib.Error:
+        return None
+    uris = locs.get(window_path) or (next(iter(locs.values())) if len(locs) == 1 else None)
+    if not uris:
+        return None
+    u = urlparse(uris[0])
+    return unquote(u.path) if u.scheme == 'file' else None
+
+
+def desktop_folder():
+    out = subprocess.run(['xdg-user-dir', 'DESKTOP'], capture_output=True, text=True).stdout.strip()
+    return out or os.path.expanduser('~/Desktop')
+
+
+def frames(app_names, title):
+    """Le finestre (frame) accessibili delle app indicate, con quella dal titolo giusto per prima."""
+    desk = Atspi.get_desktop(0)
+    found = []
+    for i in range(desk.get_child_count()):
+        app = desk.get_child_at_index(i)
+        if not app or app.get_name() not in app_names:
+            continue
+        for j in range(app.get_child_count()):
+            f = app.get_child_at_index(j)
+            if f and f.get_role() == Atspi.Role.FRAME:
+                found.append(f)
+    found.sort(key=lambda f: f.get_name() != title)
+    return found
+
+
+def extents(acc):
+    try:
+        e = acc.get_extents(Atspi.CoordType.WINDOW)
+    except Exception:
+        return None
+    return e if e.width > 0 and e.height > 0 else None
+
+
+def contains(acc, x, y):
+    e = extents(acc)
+    return e is not None and e.x <= x < e.x + e.width and e.y <= y < e.y + e.height
+
+
+def chain_at(acc, x, y, depth=0):
+    """Gli elementi che contengono il punto, dal più esterno al più interno.
+    I contenitori senza dimensioni (capita in GTK 4) vengono attraversati."""
+    if depth > 40:
+        return []
+    for i in reversed(range(acc.get_child_count())):
+        c = acc.get_child_at_index(i)
+        if not c:
+            continue
+        if contains(c, x, y):
+            return [c] + chain_at(c, x, y, depth + 1)
+        if extents(c) is None:
+            sub = chain_at(c, x, y, depth + 1)
+            if sub:
+                return sub
+    return []
+
+
+def candidates(name):
+    name = (name or '').replace('​', '').strip()
+    if not name:
+        return
+    yield name
+    changed = True
+    while changed:
+        changed = False
+        for s in SUFFIXES:
+            if name.endswith(s):
+                name = name[: -len(s)]
+                changed = True
+                yield name
+
+
+def path_of(folder, acc):
+    for n in candidates(acc.get_name()):
+        if '/' in n:
+            continue
+        p = os.path.join(folder, n)
+        if os.path.lexists(p):
+            return p
+    return None
+
+
+def selected(folder, chain, picked):
+    """Se il file cliccato fa parte di una selezione di più file, tutti i file selezionati."""
+    for acc in reversed(chain):
+        try:
+            n = acc.get_n_selected_children()
+        except Exception:
+            continue
+        if n < 2:
+            continue
+        paths = []
+        for i in range(min(n, 500)):
+            try:
+                c = acc.get_selected_child(i)
+            except Exception:
+                c = None
+            p = c and (path_of(folder, c) or next((q for q in (path_of(folder, c.get_child_at_index(j))
+                                                             for j in range(c.get_child_count())) if q), None))
+            if p and p not in paths:
+                paths.append(p)
+        if picked in paths and len(paths) > 1:
+            paths.remove(picked)
+            return [picked] + paths
+    return [picked]
+
+
+def search(acc, x, y, folder, chain, depth=0):
+    """Ricerca completa: la catena fino al primo elemento sotto il punto che è un file della cartella.
+    Serve quando il punto cade su più contenitori sovrapposti (es. la vista a elenco di Nautilus in GTK 4):
+    si scartano solo i rami che hanno una posizione e non contengono il punto."""
+    if depth > 40:
+        return None
+    for i in reversed(range(acc.get_child_count())):
+        c = acc.get_child_at_index(i)
+        if not c:
+            continue
+        e = extents(c)
+        if e is not None and not (e.x <= x < e.x + e.width and e.y <= y < e.y + e.height):
+            continue
+        if e is not None and path_of(folder, c):
+            return chain + [c]
+        found = search(c, x, y, folder, chain + [c], depth + 1)
+        if found:
+            return found
+    return None
+
+
+def near(acc, x, y, folder, chain, tol, found, depth=0):
+    """Come search, ma raccoglie i file a meno di `tol` pixel dal punto (distanza, catena).
+    Serve per i clic nello spazio tra due righe o due icone."""
+    if depth > 40:
+        return
+    for i in range(acc.get_child_count()):
+        c = acc.get_child_at_index(i)
+        if not c:
+            continue
+        e = extents(c)
+        if e is not None:
+            dx = max(e.x - x, 0, x - (e.x + e.width - 1))
+            dy = max(e.y - y, 0, y - (e.y + e.height - 1))
+            if dx > tol or dy > tol:
+                continue
+            if path_of(folder, c):
+                found.append((dx * dx + dy * dy, chain + [c]))
+                continue
+        near(c, x, y, folder, chain + [c], tol, found, depth + 1)
+
+
+def pick(folder, title, x, y, apps):
+    """Il file sotto il puntatore e, se fa parte di una selezione multipla, gli altri selezionati."""
+    for frame in frames(apps, title):
+        if not contains(frame, x, y):
+            continue
+        # Prima la via veloce (un solo ramo), poi la ricerca completa.
+        chain = [frame] + chain_at(frame, x, y)
+        for acc in reversed(chain):
+            p = path_of(folder, acc)
+            if p:
+                return selected(folder, chain, p)
+        chain = search(frame, x, y, folder, [frame])
+        if chain:
+            return selected(folder, chain, path_of(folder, chain[-1]))
+        # Clic nello spazio tra due elementi: il file più vicino, se è a pochi pixel.
+        found = []
+        near(frame, x, y, folder, [frame], 14, found)
+        if found:
+            chain = min(found, key=lambda f: f[0])[1]
+            return selected(folder, chain, path_of(folder, chain[-1]))
+        break
+    return None
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--app', choices=APPS.keys(), required=True)
+    ap.add_argument('--title', default='')
+    ap.add_argument('--window-path', default='')
+    ap.add_argument('--x', type=float, required=True)
+    ap.add_argument('--y', type=float, required=True)
+    ap.add_argument('--menu-x', type=float)
+    ap.add_argument('--menu-y', type=float)
+    ap.add_argument('--dry-run', action='store_true')
+    a = ap.parse_args()
+
+    folder = desktop_folder() if a.app == 'desktop' else nautilus_folder(a.window_path)
+    if not folder or not os.path.isdir(folder):
+        return 1
+    paths = pick(folder, a.title, a.x, a.y, APPS[a.app])
+    if not paths:
+        # Subito dopo il clic Nautilus può essere a metà di un aggiornamento: si riprova una volta.
+        time.sleep(0.15)
+        paths = pick(folder, a.title, a.x, a.y, APPS[a.app]) or [folder]
+    if a.dry_run:
+        print('\n'.join(paths))
+        return 0
+    exe = shutil.which('halo')
+    if not exe:
+        return 1
+    pos = [f'--pos={a.menu_x:.0f},{a.menu_y:.0f}'] if a.menu_x is not None and a.menu_y is not None else []
+    subprocess.Popen([exe, *pos, '--', *paths], start_new_session=True)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
