@@ -27,3 +27,5 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 # Più file scelti in Esplora file avviano Halo una volta per file: la prima istanza li raccoglie tutti.
 tauri-plugin-single-instance = "2"
+# Il PATH aggiornato dal registro (programmi appena installati).
+winreg = "0.55"

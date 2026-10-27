@@ -2,5 +2,12 @@
   "uuid": "halo@halo.dev",
   "name": "Halo",
   "description": "Alt+clic su un file in Nautilus o sul desktop apre il menu radiale di Halo.",
-  "shell-version": ["50"]
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ]
 }

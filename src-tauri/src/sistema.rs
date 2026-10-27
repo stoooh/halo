@@ -63,8 +63,34 @@ fn gs_dir() -> Option<PathBuf> {
 /// Cerca un programma nel PATH (con «.exe» su Windows).
 pub fn find_program(name: &str) -> Option<PathBuf> {
     let exts: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ".bat", ""] } else { &[""] };
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).flat_map(|d| exts.iter().map(move |e| d.join(format!("{}{}", name, e)))).find(|p| p.is_file())
+    search_dirs().into_iter().flat_map(|d| exts.iter().map(move |e| d.join(format!("{}{}", name, e)))).find(|p| p.is_file())
+}
+
+/// Le cartelle dove cercare i programmi: il PATH di Halo e, su Windows, anche quello aggiornato nel
+/// registro (i programmi appena installati con winget non sono ancora nel PATH di Esplora file
+/// fino al prossimo accesso) e la cartella dei collegamenti di winget.
+fn search_dirs() -> Vec<PathBuf> {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut v: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    #[cfg(windows)]
+    {
+        use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+        use winreg::RegKey;
+        let reg = [(HKEY_CURRENT_USER, "Environment"), (HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")];
+        for (root, key) in reg {
+            if let Ok(p) = RegKey::predef(root).open_subkey(key).and_then(|k| k.get_value::<String, _>("Path")) {
+                for d in p.split(';').filter(|d| !d.trim().is_empty()) {
+                    // %LOCALAPPDATA% e simili nei percorsi del registro.
+                    let mut s = d.to_string();
+                    for (k, val) in std::env::vars() { s = s.replace(&format!("%{}%", k), &val); }
+                    let d = PathBuf::from(s);
+                    if !v.contains(&d) { v.push(d); }
+                }
+            }
+        }
+        if let Ok(l) = std::env::var("LOCALAPPDATA") { v.push(PathBuf::from(l).join("Microsoft\\WinGet\\Links")); }
+    }
+    v
 }
 
 /// Nome del programma con l'estensione del sistema («realesrgan-ncnn-vulkan.exe» su Windows).

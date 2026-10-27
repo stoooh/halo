@@ -15,6 +15,18 @@ src-tauri/          app desktop (Rust + Tauri 2)
 nautilus/           voce "Azioni rapide…" nel menu del tasto destro
 ```
 
+## 0. Installazione automatica (consigliata)
+
+Dalla pagina **Releases** del repository scarica, per il tuo sistema:
+
+- **Linux (Ubuntu/GNOME):** `Halo_…_amd64.deb` e `installa-halo.sh` nella stessa cartella, poi
+  `bash installa-halo.sh`. Installa i programmi necessari, la voce del tasto destro di Nautilus e
+  l'Alt+clic (attivo dal prossimo accesso).
+- **Windows 10/11:** `Halo_…_x64-setup.exe`. Alla fine chiede se installare i programmi necessari
+  (con winget, circa 1 GB): rispondi **Sì**.
+
+Gli installer li crea GitHub (`.github/workflows/release.yml`) a ogni tag `v…`.
+
 ## 1. Preparare Ubuntu (24.04 o successivo)
 
 ```bash
@@ -206,9 +218,8 @@ Lo stesso codice si compila anche per **Windows 10/11**: le differenze (dove sta
 appunti, cestino, notifiche, «Mostra nella cartella») sono tutte in `src-tauri/src/sistema.rs`,
 la configurazione in `src-tauri/tauri.windows.conf.json`.
 
-- **Installer:** da GitHub, *Actions › Windows › Run workflow*; a fine esecuzione l'installer
-  `Halo_…_x64-setup.exe` si scarica da *Artifacts*. Si installa solo per l'utente, senza permessi
-  di amministratore.
+- **Installer:** `Halo_…_x64-setup.exe` dalla pagina Releases (vedi sopra). Si installa solo per
+  l'utente; alla fine propone di installare i programmi necessari con winget.
 - **Menu del tasto destro:** l'installazione aggiunge «Azioni rapide (Halo)» su file, cartelle e
   sfondo delle cartelle (registro, `HKCU\Software\Classes`). Su Windows 11 è in «Mostra altre opzioni».
   Con più file selezionati, Halo li raccoglie in un solo menu.
