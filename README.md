@@ -199,3 +199,26 @@ Le impostazioni si aprono **tenendo premuto il cerchio centrale per 1,5 secondi*
 Frecce: spostarsi · Invio: scegliere · Esc / Backspace: indietro · Esc al primo livello: chiudere. · Ctrl+virgola: impostazioni.
 
 Il menu si chiude con un clic fuori o con Esc. Dopo un'operazione resta aperto 5 secondi; se nel frattempo lo usi, resta aperto.
+
+## Windows (in sviluppo)
+
+Lo stesso codice si compila anche per **Windows 10/11**: le differenze (dove stanno i programmi,
+appunti, cestino, notifiche, «Mostra nella cartella») sono tutte in `src-tauri/src/sistema.rs`,
+la configurazione in `src-tauri/tauri.windows.conf.json`.
+
+- **Installer:** da GitHub, *Actions › Windows › Run workflow*; a fine esecuzione l'installer
+  `Halo_…_x64-setup.exe` si scarica da *Artifacts*. Si installa solo per l'utente, senza permessi
+  di amministratore.
+- **Menu del tasto destro:** l'installazione aggiunge «Azioni rapide (Halo)» su file, cartelle e
+  sfondo delle cartelle (registro, `HKCU\Software\Classes`). Su Windows 11 è in «Mostra altre opzioni».
+  Con più file selezionati, Halo li raccoglie in un solo menu.
+- **Programmi necessari** (una volta, da PowerShell):
+
+```powershell
+winget install ImageMagick.ImageMagick ArtifexSoftware.GhostScript QPDF.QPDF oschwartz10612.Poppler Gyan.FFmpeg 7zip.7zip OliverBetz.ExifTool JohnMacFarlane.Pandoc TheDocumentFoundation.LibreOffice UB-Mannheim.TesseractOCR Python.Python.3.12
+py -m pip install openpyxl msoffcrypto-tool
+```
+
+- **Non ancora disponibili su Windows:** Alt+clic, Upscayl (Real-ESRGAN), l'elenco delle app in
+  Condividi (restano Gmail, Link e «Mostra nella cartella»), OCR dei PDF (ocrmypdf).
+

@@ -55,7 +55,7 @@ fn pass(d: &Path, src: &Path, dst: &Path, modello: &str, fmt: Option<&str>, tmp:
 
 pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<String, String> {
     if kind_of(input) != "image" { return Err("Funziona con le immagini.".into()); }
-    let d = dir().ok_or("Manca il programma di ingrandimento: reinstalla Halo.")?;
+    let d = dir().ok_or(if cfg!(windows) { "Upscayl non è ancora disponibile nella versione per Windows." } else { "Manca il programma di ingrandimento: reinstalla Halo." })?;
     let (scala, modello) = options(data);
     let out = planned_out(input, key, data).ok_or("Opzione non disponibile.")?;
     let fmt = out.extension().and_then(|e| e.to_str()).map(|e| if e == "jpeg" { "jpg" } else { e }).unwrap_or("png").to_string();

@@ -10,6 +10,7 @@ const UUID: &str = "halo@halo.dev";
 
 /// Esegue la configurazione e dice cosa ha fatto.
 pub fn run() -> String {
+    if cfg!(windows) { return "Su Windows non serve: il menu del tasto destro lo registra l'installazione.".into(); }
     let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
     let marker = std::env::var("XDG_CONFIG_HOME").ok().filter(|d| !d.is_empty()).map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config")).join("halo").join(format!("configurato-{}", env!("CARGO_PKG_VERSION")));

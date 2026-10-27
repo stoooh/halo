@@ -6,9 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 
 fn path() -> PathBuf {
-    let base = std::env::var("XDG_CONFIG_HOME").ok().filter(|d| !d.is_empty()).map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into())).join(".config"));
-    base.join("halo").join("impostazioni.json")
+    crate::sistema::config_dir().join("impostazioni.json")
 }
 
 /// Aspetto approvato: arancio, tema del sistema, vetro e grandezza normali.

@@ -6,7 +6,6 @@ use crate::actions::{name, out_dir, run_cmd, s};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 pub const KEYS: &[&str] = &[
     "other/comprimi/zip", "other/comprimi/zip-protetto", "other/comprimi/7z", "slides/comprimi/zip",
@@ -24,13 +23,13 @@ pub fn planned_out(input: &Path, key: &str) -> Option<PathBuf> {
 }
 
 fn sha256(p: &Path) -> Result<String, String> {
-    run_cmd("sha256sum", &[&s(p)])?.split_whitespace().next().map(String::from).ok_or_else(|| "Impronta non calcolata.".into())
+    crate::sistema::sha256(p)
 }
 
 /// Copia un testo negli appunti (non durante i test, per non toccare gli appunti di chi li lancia).
 fn copy(text: &str) -> bool {
     if cfg!(test) { return false; }
-    crate::condividi::copy_text(text).is_ok()
+    crate::sistema::clipboard_text(text).is_ok()
 }
 
 pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<String, String> {
@@ -58,11 +57,7 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
         }
         k if k.ends_with("/condividi/copia-percorso") => {
             let p = s(input);
-            if !cfg!(test) {
-                let st = Command::new("wl-copy").arg(&p).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status()
-                    .map_err(|_| "Manca «wl-copy». Installa con: sudo apt install wl-clipboard".to_string())?;
-                if !st.success() { return Err("Non sono riuscito a copiare negli appunti.".into()); }
-            }
+            if !cfg!(test) { crate::sistema::clipboard_text(&p)?; }
             Ok(format!("Percorso copiato negli appunti:\n{}", p))
         }
         "slides/converti/pdf" => crate::actions::convert_office(input, "pdf"),
@@ -122,7 +117,7 @@ mod tests {
         run_cmd("convert", &["-size", "1600x1200", "plasma:fractal", &s(&dir.join("foto.jpg"))]).unwrap();
         fs::write(&md, "---\ntitle: Prova\nauthor: Mario Rossi\n---\n\n# Uno\n\nTesto\n\n# Due\n\n![](foto.jpg)\n").unwrap();
         let ppt = dir.join("Presentazione.pptx");
-        let o = Command::new("pandoc").args([s(&md), "-o".into(), s(&ppt)]).current_dir(&dir).output().unwrap();
+        let o = crate::sistema::cmd("pandoc").args([s(&md), "-o".into(), s(&ppt)]).current_dir(&dir).output().unwrap();
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(kind_of(&ppt), "slides");
         let prima = fs::read(&ppt).unwrap();

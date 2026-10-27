@@ -6,7 +6,7 @@ use crate::actions::{name, out_dir, out_path, run_cmd, s};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 pub const KEYS: &[&str] = &["multi/insieme/zip", "multi/insieme/per-email", "multi/insieme/rinomina-in-serie", "multi/insieme/data-di-scatto",
     "multi/insieme/unisci", "multi/insieme/unisci-in-pdf", "multi/insieme/percorsi"];
@@ -62,7 +62,7 @@ pub fn run(files: &[PathBuf], key: &str, data: &HashMap<String, String>) -> Resu
             for (k, f) in sorted.iter().enumerate() {
                 let ext = f.extension().and_then(|e| e.to_str()).filter(|_| f.is_file()).map(|e| format!(".{}", e.to_lowercase())).unwrap_or_default();
                 let dest = dir.join(format!("{} {:0w$}{}", nome, k + 1, ext, w = w));
-                let ok = Command::new("cp").args(["-a", "--reflink=auto", &s(f), &s(&dest)]).stdin(Stdio::null()).status().map(|st| st.success()).unwrap_or(false);
+                let ok = crate::sistema::copy_all(f, &dest).is_ok();
                 if !ok { let _ = fs::remove_dir_all(&dir); return Err(format!("Non riesco a copiare {}.", name(f))); }
             }
             Ok(format!("Creato: {} ({} copie rinominate)", name(&dir), sorted.len()))
@@ -94,7 +94,7 @@ pub fn run(files: &[PathBuf], key: &str, data: &HashMap<String, String>) -> Resu
                 let mut dest = dir.join(&wanted);
                 let mut k = 2;
                 while dest.exists() { dest = dir.join(format!("{} ({}){}", stem, k, ext)); k += 1; }
-                let ok = Command::new("cp").args(["-a", "--reflink=auto", &s(f), &s(&dest)]).stdin(Stdio::null()).status().map(|st| st.success()).unwrap_or(false);
+                let ok = crate::sistema::copy_all(f, &dest).is_ok();
                 if !ok { let _ = fs::remove_dir_all(&dir); return Err(format!("Non riesco a copiare {}.", name(f))); }
             }
             if n == 0 { let _ = fs::remove_dir_all(&dir); return Err("Nessuno dei file ha una data di scatto nei metadati: nessuna copia creata.".into()); }
@@ -159,7 +159,7 @@ fn per_email(files: &[PathBuf]) -> Result<String, String> {
         let list: Vec<String> = fs::read_dir(&tmp).map_err(|e| e.to_string())?.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         let mut args = vec!["a".to_string(), "-tzip".into(), "-mx=9".into(), "-bd".into(), s(&out)];
         args.extend(list);
-        let o = Command::new("7z").args(&args).current_dir(&tmp).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+        let o = crate::sistema::cmd("7z").args(&args).current_dir(&tmp).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
         if !o.status.success() { return Err("7z non è riuscito a creare lo ZIP.".into()); }
         let size = fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
         let mut msg = format!("Creato: {} ({} file, {} alleggeriti: {} → {})", name(&out), files.len(), lighter,
@@ -176,8 +176,7 @@ fn per_email(files: &[PathBuf]) -> Result<String, String> {
 
 /// Dimensione di un file o di una cartella (somma dei file).
 fn du(p: &Path) -> u64 {
-    if p.is_file() { return fs::metadata(p).map(|m| m.len()).unwrap_or(0); }
-    run_cmd("du", &["-sb", &s(p)]).ok().and_then(|o| o.split_whitespace().next().and_then(|v| v.parse().ok())).unwrap_or(0)
+    crate::sistema::size_and_count(p).0
 }
 
 /// Copia (file o cartella) dentro la cartella temporanea, con un nome libero.
@@ -185,7 +184,7 @@ fn copy_in(f: &Path, dir: &Path) -> Result<(), String> {
     let mut dest = dir.join(name(f));
     let mut k = 2;
     while dest.exists() { dest = dir.join(format!("{} ({})", name(f), k)); k += 1; }
-    let ok = Command::new("cp").args(["-a", "--reflink=auto", &s(f), &s(&dest)]).stdin(Stdio::null()).status().map(|st| st.success()).unwrap_or(false);
+    let ok = crate::sistema::copy_all(f, &dest).is_ok();
     if ok { Ok(()) } else { Err(format!("Non riesco a copiare {}.", name(f))) }
 }
 

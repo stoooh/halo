@@ -41,6 +41,10 @@ enum Avvio {
     Cmd(String, Vec<String>),
     /// File .desktop da aprire con `gio launch`.
     Desktop(PathBuf),
+    /// Indirizzo da aprire con il programma predefinito (browser, Telegram…); "{link}"… sostituiti.
+    Url(String),
+    /// Mostra il file nel gestore dei file.
+    Mostra,
 }
 
 #[derive(Serialize)]
@@ -113,8 +117,8 @@ fn upload_to(file: &Path, url: &str) -> Result<(String, (String, String)), (bool
     let shown: String = name(file).chars().map(|c| if "\";,\\".contains(c) || c.is_control() { '_' } else { c }).collect();
     let field = format!("file=@-;filename={}", shown);
     let input = fs::File::open(file).map_err(|e| (false, e.to_string()))?;
-    let curl = if Path::new("/usr/bin/curl").exists() { "/usr/bin/curl" } else { "curl" };
-    let o = Command::new(curl).args(["-sS", "--fail-with-body", "--connect-timeout", "20", "--max-time", "7200", "-F", &field, url])
+    let curl = "curl";
+    let o = crate::sistema::cmd(curl).args(["-sS", "--fail-with-body", "--connect-timeout", "20", "--max-time", "7200", "-F", &field, url])
         .stdin(input).output().map_err(|_| (false, "Manca «curl». Installa con: sudo apt install curl".to_string()))?;
     let body = String::from_utf8_lossy(&o.stdout);
     let page = serde_json::from_str::<serde_json::Value>(&body).ok()
@@ -133,10 +137,7 @@ fn upload_to(file: &Path, url: &str) -> Result<(String, (String, String)), (bool
 
 /// Copia un testo negli appunti.
 pub(crate) fn copy_text(text: &str) -> Result<(), String> {
-    let st = Command::new("wl-copy").arg(text)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status()
-        .map_err(|_| "Manca «wl-copy». Installa con: sudo apt install wl-clipboard".to_string())?;
-    if st.success() { Ok(()) } else { Err("Non sono riuscito a copiare il link negli appunti.".into()) }
+    crate::sistema::clipboard_text(text)
 }
 
 /// Apre l'app scelta nel pannello.
@@ -150,8 +151,14 @@ pub fn open(id: &str) -> Result<String, String> {
             let args: Vec<String> = args.iter().map(|x| x.replace("{file}", &s(&file)).replace("{uri}", &uri)
                 .replace("{link_enc}", &encode(&l, b"-._~")).replace("{link}", &l)).collect();
             spawn(prog, &args).map_err(|_| format!("Non riesco ad aprire {}.", a.nome))?;
-            if a.id == "gmail" && link.is_none() { spawn("gdbus", &show_args(&uri)).ok(); }
         }
+        Avvio::Url(u) => {
+            let u = u.replace("{link_enc}", &encode(&l, b"-._~")).replace("{link}", &l);
+            crate::sistema::open(&u).map_err(|_| format!("Non riesco ad aprire {}.", a.nome))?;
+            // Gmail senza link: si allega trascinando il file dalla cartella.
+            if a.id == "gmail" && link.is_none() { crate::sistema::show_in_folder(&[file.clone()]).ok(); }
+        }
+        Avvio::Mostra => crate::sistema::show_in_folder(&[file.clone()]).map_err(|_| "Non riesco ad aprire la cartella.".to_string())?,
         Avvio::Desktop(d) => spawn("/usr/bin/gio", &["launch".to_string(), s(d)]).map_err(|_| format!("Non riesco ad aprire {}.", a.nome))?,
     }
     if link.is_some() {
@@ -172,13 +179,9 @@ pub(crate) fn spawn(prog: &str, args: &[String]) -> std::io::Result<()> {
     Command::new(prog).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|_| ())
 }
 
-/// Copia il file negli appunti come file (text/uri-list): Telegram, i browser e Nautilus lo incollano.
+/// Copia il file negli appunti come file: le chat, i browser e il gestore dei file lo incollano.
 fn copy_file(file: &Path) -> Result<(), String> {
-    // wl-copy resta attivo in background per servire gli appunti: niente pipe da aspettare.
-    let st = Command::new("wl-copy").args(["-t", "text/uri-list", &format!("{}\r\n", file_uri(file))])
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status()
-        .map_err(|_| "Manca «wl-copy». Installa con: sudo apt install wl-clipboard".to_string())?;
-    if st.success() { Ok(()) } else { Err("Non sono riuscito a copiare il file negli appunti.".into()) }
+    crate::sistema::clipboard_file(file)
 }
 
 pub fn file_uri(p: &Path) -> String {
@@ -194,12 +197,6 @@ fn encode(text: &str, keep: &[u8]) -> String {
     u
 }
 
-/// Argomenti di gdbus per mostrare il file selezionato nel gestore dei file.
-pub(crate) fn show_args(uri: &str) -> Vec<String> {
-    ["call", "--session", "--dest", "org.freedesktop.FileManager1", "--object-path", "/org/freedesktop/FileManager1",
-        "--method", "org.freedesktop.FileManager1.ShowItems"].iter().map(|x| x.to_string())
-        .chain([format!("['{}']", uri), "".to_string()]).collect()
-}
 
 /// Le voci utili di un file .desktop (solo il gruppo principale).
 #[derive(Debug, Default, Clone)]
@@ -287,7 +284,7 @@ fn apps(modo: Modo, entries: &[Entry]) -> Vec<App> {
         } else if chat && !email {
             if n.starts_with("telegram") && link {
                 // Telegram è registrato per tg://: si apre la scelta della chat con il link.
-                add(&mut v, &id, &e.nome, "link", Avvio::Cmd("xdg-open".into(), vec!["tg://msg_url?url={link_enc}".into()]));
+                add(&mut v, &id, &e.nome, "link", Avvio::Url("tg://msg_url?url={link_enc}".into()));
             } else if n.starts_with("telegram") && plain(e) {
                 add(&mut v, &id, &e.nome, "file", cmd(e, &["-sendpath", "{file}"]));
             } else {
@@ -296,18 +293,18 @@ fn apps(modo: Modo, entries: &[Entry]) -> Vec<App> {
         }
     }
     if link {
-        add(&mut v, "gmail", "Gmail (nel browser)", "link", Avvio::Cmd("xdg-open".into(), vec!["https://mail.google.com/mail/?view=cm&fs=1&body={link_enc}".into()]));
+        add(&mut v, "gmail", "Gmail (nel browser)", "link", Avvio::Url("https://mail.google.com/mail/?view=cm&fs=1&body={link_enc}".into()));
     } else if email {
-        add(&mut v, "gmail", "Gmail (nel browser)", "trascina", Avvio::Cmd("xdg-open".into(), vec!["https://mail.google.com/mail/?view=cm&fs=1".into()]));
+        add(&mut v, "gmail", "Gmail (nel browser)", "trascina", Avvio::Url("https://mail.google.com/mail/?view=cm&fs=1".into()));
     } else if Path::new("/usr/bin/bluetooth-sendto").exists() {
         add(&mut v, "bluetooth", "Bluetooth", "file", Avvio::Cmd("/usr/bin/bluetooth-sendto".into(), vec!["{file}".into()]));
     }
     v.sort_by_key(|a| (a.come != "file" && a.come != "link", a.nome.to_lowercase()));
     if link {
-        add(&mut v, "browser", "Apri nel browser", "link", Avvio::Cmd("xdg-open".into(), vec!["{link}".into()]));
+        add(&mut v, "browser", "Apri nel browser", "link", Avvio::Url("{link}".into()));
         return v;
     }
-    add(&mut v, "cartella", "Mostra nella cartella", "trascina", Avvio::Cmd("gdbus".into(), show_args("{uri}")));
+    add(&mut v, "cartella", "Mostra nella cartella", "trascina", Avvio::Mostra);
     v
 }
 

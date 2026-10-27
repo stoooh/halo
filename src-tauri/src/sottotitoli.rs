@@ -28,17 +28,14 @@ pub fn planned_out(input: &Path, key: &str) -> Option<PathBuf> {
 /// Il programma di whisper.cpp (il nome cambia tra le versioni).
 fn whisper_bin() -> Result<String, String> {
     for b in ["whisper-cli", "whisper-cpp", "whisper.cpp", "whisper"] {
-        if Command::new("which").arg(b).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false) {
-            return Ok(b.to_string());
-        }
+        if let Some(p) = crate::sistema::find_program(b) { return Ok(p.to_string_lossy().into_owned()); }
     }
-    Err("Manca whisper.cpp. Installa con: sudo apt install whisper.cpp".into())
+    Err(if cfg!(windows) { "Manca whisper.cpp: scarica whisper-bin-x64.zip da github.com/ggml-org/whisper.cpp e metti la cartella nel PATH.".into() }
+        else { "Manca whisper.cpp. Installa con: sudo apt install whisper.cpp".into() })
 }
 
 fn cache() -> PathBuf {
-    std::env::var("XDG_CACHE_HOME").ok().filter(|d| !d.is_empty()).map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache"))
-        .join("halo/whisper")
+    crate::sistema::cache_dir().join("whisper")
 }
 
 /// Il modello scelto; la prima volta lo scarica (solo il file del modello, da Hugging Face).
@@ -48,7 +45,7 @@ fn model(id: &str) -> Result<PathBuf, String> {
     if path.is_file() { return Ok(path); }
     fs::create_dir_all(cache()).map_err(|e| e.to_string())?;
     let part = path.with_extension("part");
-    let st = Command::new("curl").args(["-sSL", "--fail", "--connect-timeout", "20", "-o", &s(&part), &format!("{}{}", URL, file)])
+    let st = crate::sistema::cmd("curl").args(["-sSL", "--fail", "--connect-timeout", "20", "-o", &s(&part), &format!("{}{}", URL, file)])
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
     if !st.map(|s| s.success()).unwrap_or(false) || crate::lavoro::cancelled() {
         let _ = fs::remove_file(&part);

@@ -6,7 +6,6 @@ use crate::actions::{name, out_dir, out_path, run_cmd, s, seven_in};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub const KEYS: &[&str] = &[
     "archive/estrai/solo-alcuni", "archive/contenuto/rimuovi-file", "archive/contenuto/sostituisci", "archive/contenuto/rinomina",
@@ -115,7 +114,7 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
                 let dest = tmp.join(&old);
                 fs::create_dir_all(dest.parent().unwrap()).map_err(|e| e.to_string())?;
                 fs::copy(&file, &dest).map_err(|e| e.to_string())?;
-                let o = Command::new("7z").args(["u", "-bd", "-y", &s(&out), &old]).current_dir(&tmp).output().map_err(|e| e.to_string())?;
+                let o = crate::sistema::cmd("7z").args(["u", "-bd", "-y", &s(&out), &old]).current_dir(&tmp).output().map_err(|e| e.to_string())?;
                 if o.status.success() { Ok(()) } else { Err("7z non è riuscito ad aggiornare l'archivio.".to_string()) }
             })();
             let _ = fs::remove_dir_all(&tmp);

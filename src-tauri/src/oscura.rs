@@ -10,7 +10,6 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub const KEYS: &[&str] = &[
     "pdf/oscura-dati/email", "pdf/oscura-dati/telefoni", "pdf/oscura-dati/iban", "pdf/oscura-dati/manuale",
@@ -387,7 +386,7 @@ fn docx_redact(input: &Path, out: &Path, w: What, terms: &[String]) -> Result<()
         }
         let mut args = vec!["u".to_string(), "-tzip".into(), "-bd".into(), s(out)];
         args.extend(changed);
-        let o = Command::new("7z").args(&args).current_dir(&tmp).output().map_err(|e| e.to_string())?;
+        let o = crate::sistema::cmd("7z").args(&args).current_dir(&tmp).output().map_err(|e| e.to_string())?;
         if o.status.success() { Ok(()) } else { Err("7z non è riuscito ad aggiornare il documento.".to_string()) }
     })();
     let _ = fs::remove_dir_all(&tmp);

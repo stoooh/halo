@@ -8,9 +8,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{ErrorKind, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// Chiavi effettivamente implementate. Il menu mostra le altre come "presto".
 pub const SUPPORTED: &[&str] = &[
@@ -587,9 +586,7 @@ fn run_inner(path: &str, key: &str, data: &HashMap<String, String>) -> Result<St
             Ok(format!("Creato in parti da 100 MB: {}.001, .002…", name(&out)))
         }
         "folder/analizza/dimensione" => {
-            let txt = run_cmd("du", &["-sb", &i])?;
-            let bytes: u64 = txt.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0);
-            let files = run_cmd("find", &[&i, "-type", "f"])?.lines().count();
+            let (bytes, files) = crate::sistema::size_and_count(&input);
             Ok(format!("Dimensione totale: {} in {} file", human(bytes), files))
         }
 
@@ -795,19 +792,12 @@ pub(crate) fn parent(p: &Path) -> PathBuf {
 }
 
 fn writable(dir: &Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else { return false };
-    // SAFETY: access() legge solo il percorso, terminato da zero.
-    dir.is_dir() && unsafe { libc::access(c.as_ptr(), libc::W_OK) } == 0
+    crate::sistema::writable(dir)
 }
 
 /// La Scrivania dell'utente (~/Scrivania in italiano), o la home se non c'è.
 pub(crate) fn desktop_dir() -> PathBuf {
-    let home = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()));
-    Command::new("xdg-user-dir").arg("DESKTOP").output().ok()
-        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
-        .filter(|d| d.is_dir() && *d != home && writable(d))
-        .unwrap_or(home)
+    crate::sistema::desktop_dir()
 }
 fn stem(p: &Path) -> String { p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into()) }
 fn done(out: &Path) -> Result<String, String> { Ok(format!("Creato: {}", name(out))) }
@@ -860,7 +850,8 @@ fn package_for(cmd: &str) -> &'static str {
 pub(crate) fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
     if crate::lavoro::cancelled() { return Err("Annullato.".into()); }
     let r = if cmd == "ffmpeg" { ffmpeg_progress(args) } else {
-        Command::new(cmd).args(args).output().map(|o| (o.status, String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned()))
+        crate::lavoro::run_tracked(&mut crate::sistema::cmd(cmd).args(args))
+            .map(|o| (o.status, String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned()))
     };
     match r {
         Ok((st, out, _)) if st.success() => Ok(out),
@@ -869,10 +860,35 @@ pub(crate) fn run_cmd(cmd: &str, args: &[&str]) -> Result<String, String> {
             let last = err.lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("errore sconosciuto");
             Err(format!("{} non è riuscito: {}", cmd, last.trim()))
         }
-        Err(e) if e.kind() == ErrorKind::NotFound => {
-            Err(format!("Manca «{}». Installa con: sudo apt install {}", cmd, package_for(cmd)))
-        }
+        Err(e) if e.kind() == ErrorKind::NotFound => Err(missing(cmd)),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Messaggio per un programma esterno che manca, con il comando per installarlo.
+pub(crate) fn missing(cmd: &str) -> String {
+    if cfg!(windows) {
+        format!("Manca «{}». Installalo con: {}", cmd, winget_for(cmd))
+    } else {
+        format!("Manca «{}». Installa con: sudo apt install {}", cmd, package_for(cmd))
+    }
+}
+
+/// Su Windows i programmi si installano con winget (vedi README, sezione Windows).
+fn winget_for(cmd: &str) -> &'static str {
+    match cmd {
+        "convert" | "identify" | "magick" => "winget install ImageMagick.ImageMagick",
+        "gs" => "winget install ArtifexSoftware.GhostScript",
+        "qpdf" => "winget install QPDF.QPDF",
+        "pdftotext" | "pdftoppm" | "pdfinfo" => "winget install oschwartz10612.Poppler",
+        "ffmpeg" | "ffprobe" => "winget install Gyan.FFmpeg",
+        "soffice" => "winget install TheDocumentFoundation.LibreOffice",
+        "pandoc" => "winget install JohnMacFarlane.Pandoc",
+        "7z" => "winget install 7zip.7zip",
+        "exiftool" => "winget install OliverBetz.ExifTool",
+        "tesseract" => "winget install UB-Mannheim.TesseractOCR",
+        "python3" => "winget install Python.Python.3.12 (poi: py -m pip install openpyxl msoffcrypto-tool)",
+        _ => "il programma corrispondente (vedi README, sezione Windows)",
     }
 }
 
@@ -885,7 +901,7 @@ fn ffmpeg_progress(args: &[&str]) -> std::io::Result<(std::process::ExitStatus, 
     if let Some(t) = arg_after("-t") { total = total.min(t); }
     let mut full = vec!["-progress", "pipe:1", "-nostats"];
     full.extend_from_slice(args);
-    crate::lavoro::run_lines(Command::new("ffmpeg").args(&full), false, |l| {
+    crate::lavoro::run_lines(crate::sistema::cmd("ffmpeg").args(&full), false, |l| {
         if let (Some(us), true) = (l.strip_prefix("out_time_us=").and_then(|v| v.parse::<f64>().ok()), total > 0.0) {
             crate::lavoro::set(us / 1_000_000.0 / total);
         }
@@ -895,13 +911,11 @@ fn ffmpeg_progress(args: &[&str]) -> std::io::Result<(std::process::ExitStatus, 
 /// Come run_cmd, ma scrive `stdin` sull'ingresso del programma (per le password:
 /// così non compaiono nella riga di comando, visibile agli altri programmi).
 fn run_cmd_in(cmd: &str, args: &[&str], stdin: &str) -> Result<String, String> {
-    let child = Command::new(cmd).args(args)
+    let child = crate::sistema::cmd(cmd).args(args)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
     let mut child = match child {
         Ok(c) => c,
-        Err(e) if e.kind() == ErrorKind::NotFound => {
-            return Err(format!("Manca «{}». Installa con: sudo apt install {}", cmd, package_for(cmd)))
-        }
+        Err(e) if e.kind() == ErrorKind::NotFound => return Err(missing(cmd)),
         Err(e) => return Err(e.to_string()),
     };
     if let Some(mut si) = child.stdin.take() {
@@ -968,7 +982,7 @@ pub(crate) fn repack(input: &Path, out: &Path, read_pw: Option<&str>, write_pw: 
 
 fn qpdf_encrypted(input: &Path) -> bool {
     // qpdf --is-encrypted esce con 0 se il PDF è cifrato, 2 se non lo è.
-    Command::new("qpdf").args(["--is-encrypted", &s(input)]).output().map(|o| o.status.success()).unwrap_or(false)
+    crate::sistema::cmd("qpdf").args(["--is-encrypted", &s(input)]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 /// qpdf con le opzioni in un file JSON temporaneo leggibile solo dall'utente
@@ -976,7 +990,12 @@ fn qpdf_encrypted(input: &Path) -> bool {
 pub(crate) fn qpdf_job(job: serde_json::Value) -> Result<String, String> {
     let f = std::env::temp_dir().join(format!("halo-qpdf-{}.json", std::process::id()));
     let _ = fs::remove_file(&f);
-    let w = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&f)
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    // Su Linux il file è leggibile solo dall'utente; su Windows la cartella temporanea è già personale.
+    #[cfg(unix)]
+    { use std::os::unix::fs::OpenOptionsExt; opts.mode(0o600); }
+    let w = opts.open(&f)
         .and_then(|mut h| h.write_all(job.to_string().as_bytes()));
     // --warning-exit-0: gli avvisi (codice 3) non sono errori, il file viene creato comunque.
     let r = w.map_err(|e| e.to_string())
@@ -1151,7 +1170,7 @@ fn ooxml_core(input: &Path, out: &Path, edit: impl Fn(&str) -> String) -> Result
         fs::write(tmp.join("docProps/core.xml"), edit(&xml)).map_err(|e| e.to_string())?;
         fs::copy(input, out).map_err(|e| e.to_string())?;
         // Percorso relativo dalla cartella temporanea: nell'archivio resta "docProps/core.xml".
-        let o = Command::new("7z").args(["u", "-tzip", "-bd", &s(out), "docProps/core.xml"])
+        let o = crate::sistema::cmd("7z").args(["u", "-tzip", "-bd", &s(out), "docProps/core.xml"])
             .current_dir(&tmp).output().map_err(|e| e.to_string())?;
         if o.status.success() { Ok(()) } else { Err("7z non è riuscito ad aggiornare il file.".to_string()) }
     })();
@@ -1575,7 +1594,7 @@ mod tests {
 
         // Presentazione (con una foto, per «Comprimi › Immagini interne») e un file di tipo sconosciuto.
         fs::write(c.join("slide.md"), "---\ntitle: Prova\nauthor: Mario Rossi\n---\n\n# Uno\n\nTesto\n\n# Due\n\n![](foto.jpg)\n").unwrap();
-        let o = Command::new("pandoc").args(["slide.md", "-o", "presentazione.pptx"]).current_dir(&c).output().unwrap();
+        let o = crate::sistema::cmd("pandoc").args(["slide.md", "-o", "presentazione.pptx"]).current_dir(&c).output().unwrap();
         assert!(o.status.success());
         fs::remove_file(c.join("slide.md")).unwrap();
         fs::write(c.join("progetto.blend"), "dati di prova\n").unwrap();

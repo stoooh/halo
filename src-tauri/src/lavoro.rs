@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 static CANCEL: AtomicBool = AtomicBool::new(false);
+/// I programmi lanciati per il lavoro in corso: «Annulla» ferma questi (e solo questi).
+static FIGLI: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 /// Avanzamento e la parte del lavoro che il passaggio attuale rappresenta (inizio, ampiezza).
 static STATO: Mutex<(Option<f64>, f64, f64)> = Mutex::new((None, 0.0, 1.0));
 
@@ -41,14 +43,29 @@ pub fn cancelled() -> bool {
 /// Annulla: segna il lavoro come annullato e ferma i programmi lanciati da Halo.
 pub fn cancel() {
     CANCEL.store(true, Ordering::SeqCst);
-    let _ = Command::new("pkill").args(["-TERM", "-P", &std::process::id().to_string()])
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let pids: Vec<u32> = FIGLI.lock().unwrap().clone();
+    for p in pids { crate::sistema::kill(p); }
+}
+
+fn track(pid: u32) { FIGLI.lock().unwrap().push(pid); }
+fn untrack(pid: u32) { FIGLI.lock().unwrap().retain(|p| *p != pid); }
+
+/// Come `Command::output()`, ma il programma si può fermare con «Annulla».
+pub fn run_tracked(cmd: &mut Command) -> std::io::Result<std::process::Output> {
+    let child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let pid = child.id();
+    track(pid);
+    let o = child.wait_with_output();
+    untrack(pid);
+    o
 }
 
 /// Esegue il comando leggendo riga per riga l'uscita indicata (`stderr` o stdout) mentre lavora.
 /// Restituisce esito, stdout e stderr completi.
 pub fn run_lines(cmd: &mut Command, stderr: bool, mut on_line: impl FnMut(&str)) -> std::io::Result<(ExitStatus, String, String)> {
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let pid = child.id();
+    track(pid);
     let (mut watch, other): (Box<dyn Read + Send>, Box<dyn Read + Send>) = if stderr {
         (Box::new(child.stderr.take().unwrap()), Box::new(child.stdout.take().unwrap()))
     } else {
@@ -71,7 +88,9 @@ pub fn run_lines(cmd: &mut Command, stderr: bool, mut on_line: impl FnMut(&str))
         }
         seen.push_str(&text);
     }
-    let status = child.wait()?;
+    let status = child.wait();
+    untrack(pid);
+    let status = status?;
     let other = t.join().unwrap_or_default();
     Ok(if stderr { (status, other, seen) } else { (status, seen, other) })
 }

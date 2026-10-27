@@ -67,7 +67,7 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
             let out = planned_out(input, key).ok_or("Opzione non disponibile.")?;
             let base_name = data.get("valore").map(|v| v.trim().to_string());
             // Copia completa (cp -a mantiene date e permessi; reflink è istantaneo dove il disco lo permette).
-            run_cmd("cp", &["-a", "--reflink=auto", &s(input), &s(&out)])?;
+            crate::sistema::copy_all(input, &out)?;
             let r = modify_copy(&out, key, base_name.as_deref());
             if r.is_err() {
                 let _ = fs::remove_dir_all(&out);
@@ -110,7 +110,7 @@ fn modify_copy(root: &Path, key: &str, base_name: Option<&str>) -> Result<String
         "folder/rinomina/aggiungi-data" => {
             let files = top_files(root)?;
             for f in &files {
-                let d = run_cmd("date", &["-r", &s(f), "+%Y-%m-%d"])?.trim().to_string();
+                let d = crate::sistema::modified_local(f, "%Y-%m-%d")?;
                 g.rename(f, &format!("{} {}", d, name(f)))?;
             }
             Ok(count(files.len(), "file rinominato", "file rinominati"))
@@ -142,7 +142,7 @@ fn modify_copy(root: &Path, key: &str, base_name: Option<&str>) -> Result<String
             for f in &files {
                 let dir = match key {
                     "folder/organizza/per-tipo" => tipo_it(kind_of(f)).to_string(),
-                    "folder/organizza/per-data" => run_cmd("date", &["-r", &s(f), "+%Y-%m"])?.trim().to_string(),
+                    "folder/organizza/per-data" => crate::sistema::modified_local(f, "%Y-%m")?,
                     _ => {
                         let b = fs::metadata(f).map(|m| m.len()).unwrap_or(0);
                         if b < 1_000_000 { "Piccoli (meno di 1 MB)" } else if b < 100_000_000 { "Medi (1-100 MB)" } else { "Grandi (oltre 100 MB)" }.to_string()
@@ -359,7 +359,7 @@ fn recenti(root: &Path) -> Result<String, String> {
     if v.is_empty() { return Ok("La cartella non contiene file.".into()); }
     v.sort_by(|a, b| b.0.cmp(&a.0));
     let lines: Vec<String> = v.iter().take(6).map(|(_, p)| {
-        let d = run_cmd("date", &["-r", &s(p), "+%d/%m %H:%M"]).unwrap_or_default();
+        let d = crate::sistema::modified_local(p, "%d/%m %H:%M").unwrap_or_default();
         format!("{} {}", d.trim(), s(p.strip_prefix(root).unwrap_or(p)))
     }).collect();
     Ok(format!("Modificati di recente:\n{}", lines.join("\n")))

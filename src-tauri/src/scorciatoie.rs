@@ -2,8 +2,8 @@
 //! comando scelto dall'utente, oppure ingrandire un'immagine con il programma di Upscayl.
 //! Si configurano in Impostazioni › Scorciatoie e si salvano in impostazioni.json.
 
-use crate::actions::{kind_of, name, out_path, parent, run_cmd, s};
-use crate::condividi::{desktop_entries, parse_desktop};
+use crate::actions::{kind_of, name, out_path, run_cmd, s};
+use crate::condividi::parse_desktop;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -45,7 +45,7 @@ pub struct AppInstallata {
 
 /// Le app installate, in ordine alfabetico, per sceglierle nel pannello.
 pub fn installed_apps() -> Vec<AppInstallata> {
-    let mut v: Vec<AppInstallata> = desktop_entries().into_iter().map(|e| AppInstallata { nome: e.nome, file: s(&e.file) }).collect();
+    let mut v: Vec<AppInstallata> = crate::sistema::installed_apps().into_iter().map(|(nome, file)| AppInstallata { nome, file }).collect();
     v.sort_by_key(|a| a.nome.to_lowercase());
     v.dedup_by(|a, b| a.nome == b.nome);
     v
@@ -60,9 +60,9 @@ fn app_name(app: &str) -> String {
     name(p)
 }
 
-/// Un valore pronto per la shell: tra apici singoli, con gli apici interni protetti.
+/// Un valore pronto per la riga di comando (apici su Linux, virgolette su Windows).
 fn quote(v: &str) -> String {
-    format!("'{}'", v.replace('\'', "'\\''"))
+    crate::sistema::quote(v)
 }
 
 /// Il comando con {file}, {cartella} e {nome} sostituiti (già tra apici).
@@ -82,17 +82,12 @@ pub fn run(input: &Path, index: usize, nome: &str) -> Result<String, String> {
     let app = sc["app"].as_str().unwrap_or("");
     match sc["modo"].as_str().unwrap_or("") {
         "apri" => {
-            let r = if app.ends_with(".desktop") {
-                Command::new("/usr/bin/gio").args(["launch", app, &s(input)]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
-            } else {
-                Command::new(app).arg(input).current_dir(parent(input)).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
-            };
-            r.map_err(|_| format!("Non riesco ad aprire {}: controlla la scorciatoia nelle impostazioni.", app_name(app)))?;
+            crate::sistema::launch_with(app, input).map_err(|_| format!("Non riesco ad aprire {}: controlla la scorciatoia nelle impostazioni.", app_name(app)))?;
             Ok(format!("Aperto con {}.", app_name(app)))
         }
         "comando" => {
             let cmd = expand(sc["comando"].as_str().unwrap_or(""), input);
-            let o = Command::new("/bin/sh").args(["-c", &cmd]).current_dir(input.parent().unwrap_or(Path::new("/")))
+            let o = crate::sistema::shell(&cmd).current_dir(input.parent().unwrap_or(Path::new("/")))
                 .stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
             if o.status.success() {
                 let out = String::from_utf8_lossy(&o.stdout);
@@ -117,17 +112,16 @@ fn upscayl_bin(app: &str) -> Result<(PathBuf, PathBuf), String> {
         prog = PathBuf::from(&e.exec[0]);
     }
     if !prog.is_file() { return Err("Upscayl non trovato: forse l'hai spostato. Aggiorna la scorciatoia nelle impostazioni.".into()); }
-    // Installazione normale (es. /opt/Upscayl/upscayl): i file stanno in resources/ accanto.
-    let res = prog.parent().map(|d| d.join("resources")).filter(|r| r.join("bin/upscayl-bin").is_file());
-    if let Some(r) = res { return Ok((r.join("bin/upscayl-bin"), r.join("models"))); }
+    // Installazione normale (es. /opt/Upscayl/upscayl o, su Windows, …\Upscayl\Upscayl.exe): i file stanno in resources/ accanto.
+    let bin_name = crate::sistema::exe("upscayl-bin");
+    let res = prog.parent().map(|d| d.join("resources")).filter(|r| r.join("bin").join(&bin_name).is_file());
+    if let Some(r) = res { return Ok((r.join("bin").join(&bin_name), r.join("models"))); }
     if !prog.to_string_lossy().to_lowercase().ends_with(".appimage") {
         return Err("Non trovo il programma di ingrandimento di Upscayl in questa app.".into());
     }
     let m = fs::metadata(&prog).map_err(|e| e.to_string())?;
     let mtime = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
-    let cache = std::env::var("XDG_CACHE_HOME").ok().filter(|d| !d.is_empty()).map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache"))
-        .join("halo/upscayl").join(format!("{}-{}", m.len(), mtime));
+    let cache = crate::sistema::cache_dir().join("upscayl").join(format!("{}-{}", m.len(), mtime));
     let root = cache.join("squashfs-root/resources");
     let bin = root.join("bin/upscayl-bin");
     if !bin.is_file() || !root.join("models/upscayl-standard-4x.param").is_file() {

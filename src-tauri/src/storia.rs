@@ -6,7 +6,6 @@ use crate::actions::s;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
 const MAX: usize = 50;
@@ -36,9 +35,7 @@ pub struct VoceVista {
 }
 
 fn path() -> PathBuf {
-    let base = std::env::var("XDG_DATA_HOME").ok().filter(|d| !d.is_empty()).map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into())).join(".local/share"));
-    base.join("halo").join("cronologia.json")
+    crate::sistema::data_dir().join("cronologia.json")
 }
 
 fn load() -> Vec<Voce> {
@@ -84,9 +81,7 @@ pub fn trash(quando: u64) -> Result<String, String> {
         let p = Path::new(c);
         // Mai il file di partenza, anche se per qualche motivo fosse nell'elenco.
         if !p.exists() || c == &voce.file { continue; }
-        let ok = Command::new("/usr/bin/gio").args(["trash", c]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-            .status().map(|st| st.success()).unwrap_or(false);
-        if !ok { return Err(format!("Non riesco a spostare nel cestino {} (su questo disco il cestino non c'è).", c)); }
+        crate::sistema::trash(p)?;
         n += 1;
     }
     Ok(if n == 0 { "I file creati non ci sono più.".into() } else { format!("{} {} nel cestino.", n, if n == 1 { "file spostato" } else { "file spostati" }) })

@@ -6,7 +6,6 @@ use crate::actions::{human, name, out_path, run_cmd, s};
 use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub const KEYS: &[&str] = &[
     "document/comprimi/immagini-interne", "document/comprimi/bilanciata", "document/comprimi/massima", "document/comprimi/per-email",
@@ -60,7 +59,7 @@ pub(crate) fn write_parts(input: &Path, out: &Path, new: &[(String, Vec<u8>)]) -
         let mut args = vec!["u".to_string(), "-tzip".into(), "-bd".into(), s(out)];
         args.extend(new.iter().map(|(p, _)| p.clone()));
         // Percorsi relativi dalla cartella temporanea: nell'archivio restano uguali.
-        let o = Command::new("7z").args(&args).current_dir(&tmp).output().map_err(|e| e.to_string())?;
+        let o = crate::sistema::cmd("7z").args(&args).current_dir(&tmp).output().map_err(|e| e.to_string())?;
         if o.status.success() { Ok(()) } else { Err("7z non è riuscito ad aggiornare il file.".to_string()) }
     })();
     let _ = fs::remove_dir_all(&tmp);
@@ -121,7 +120,7 @@ pub fn run(input: &Path, key: &str) -> Result<String, String> {
             fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
             let mut new = Vec::new();
             for (k2, m) in media.iter().enumerate() {
-                let orig = Command::new("7z").args(["x", "-so", &s(input), m]).output().map_err(|e| e.to_string())?.stdout;
+                let orig = crate::sistema::cmd("7z").args(["x", "-so", &s(input), m]).output().map_err(|e| e.to_string())?.stdout;
                 let lower = m.to_lowercase();
                 let src = tmp.join(format!("{}{}", k2, if lower.ends_with(".png") { ".png" } else { ".jpg" }));
                 let dst = tmp.join(format!("{}_nuovo{}", k2, if lower.ends_with(".png") { ".png" } else { ".jpg" }));
@@ -233,7 +232,7 @@ mod tests {
         let md = dir.join("doc.md");
         fs::write(&md, "---\ntitle: Segreto\nauthor: Mario Rossi\n---\n\nTesto.\n\n![foto](foto.jpg)\n").unwrap();
         let docx = dir.join("doc.docx");
-        let o = Command::new("pandoc").args([s(&md), "-o".into(), s(&docx)]).current_dir(&dir).output().unwrap();
+        let o = crate::sistema::cmd("pandoc").args([s(&md), "-o".into(), s(&docx)]).current_dir(&dir).output().unwrap();
         assert!(o.status.success());
         let prima = fs::read(&docx).unwrap();
 

@@ -3,7 +3,7 @@
 //! mostra il file nella cartella, da trascinare nella chat.
 
 use crate::actions::s;
-use crate::condividi::{copy_text, file_uri, show_args, spawn};
+use crate::condividi::copy_text;
 use std::path::Path;
 
 /// Traduci è un'azione diretta (senza sottomenu): la lingua si sceglie nel pannello.
@@ -52,8 +52,8 @@ pub fn open(input: &Path, key: &str, lingua: &str, tool: &str, formato: &str) ->
     if !input.is_file() { return Err(format!("Il file non esiste più: {}", s(input))); }
     let (_, nome, url) = *STRUMENTI.iter().find(|t| t.0 == tool).ok_or("Strumento non valido.")?;
     copy_text(&prompt(input, lingua, formato)?)?;
-    spawn("xdg-open", &[url.to_string()]).map_err(|_| format!("Non riesco ad aprire {} nel browser.", nome))?;
-    spawn("gdbus", &show_args(&file_uri(input))).ok();
+    crate::sistema::open(url).map_err(|_| format!("Non riesco ad aprire {} nel browser.", nome))?;
+    crate::sistema::show_in_folder(&[input.to_path_buf()]).ok();
     Ok(format!("{} aperto: incolla il prompt con Ctrl+V e trascina «{}» nella chat.", nome,
         input.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()))
 }

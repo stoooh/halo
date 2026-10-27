@@ -130,11 +130,7 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
             Ok(format!("Creato: {} ({} foto)", name(&dir), n))
         }
         "folder/condividi/copia-percorso" => {
-            // wl-copy resta attivo in background per servire gli appunti: niente pipe da aspettare.
-            let st = std::process::Command::new("wl-copy").arg(&i).stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status()
-                .map_err(|_| "Manca «wl-copy». Installa con: sudo apt install wl-clipboard".to_string())?;
-            if !st.success() { return Err("Non sono riuscito a copiare negli appunti.".into()); }
+            crate::sistema::clipboard_text(&i)?;
             Ok(format!("Percorso copiato negli appunti:\n{}", i))
         }
         _ => Err("Opzione non disponibile.".into()),

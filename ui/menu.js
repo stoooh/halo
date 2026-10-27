@@ -1980,6 +1980,21 @@
     });
   }
 
+  // Aggiunge file arrivati dopo l'apertura e passa al menu per più file.
+  function addFiles(list) {
+    const before = st.files.length;
+    list.forEach((f) => { if (!st.files.some((x) => x.path === f.path)) st.files.push(f); });
+    if (st.files.length === before || st.busy || st.panel) return;
+    for (let k = TYPES.length - 1; k >= 0; k--) if (TYPES[k].multi) TYPES.splice(k, 1);
+    TYPES.push(multiType(st.files));
+    st.forms.set('multi/insieme/rinomina-in-serie', 'nome-serie-multi');
+    st.file = st.files[0]; st.type = TYPES.length - 1;
+    st.level = T().mixed ? 0 : null; st.focus = 0; st.chosen = null; st.result = null;
+    st.anim = 'rm-in'; st.animCenter = 'rm-in';
+    renderRing();
+    say(st.files.length + ' file scelti.');
+  }
+
   async function startApp() {
     try { settings = await TAURI.core.invoke('get_settings'); } catch (e) { /* aspetto predefinito */ }
     applySettings(settings.aspetto);
@@ -2015,6 +2030,8 @@
       toast('Nessun file ricevuto. Avvia con: halo /percorso/del/file', 'err');
       return;
     }
+    // Windows: con più file scelti in Esplora file ne arrivano altri dalle istanze successive.
+    if (TAURI.event) TAURI.event.listen('altri-file', (e) => addFiles(e.payload || [])).catch(() => {});
     if (isMulti()) {
       // Più file: menu dedicato; con tipi diversi si apre direttamente su «Insieme».
       TYPES.push(multiType(st.files));

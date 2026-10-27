@@ -1,6 +1,6 @@
 [package]
 name = "halo"
-version = "0.7.0"
+version = "0.8.0"
 description = "Menu radiale per azioni rapide sui file"
 edition = "2021"
 
@@ -12,6 +12,18 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
-libc = "0.2"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+dirs = "6"
+trash = "5"
+open = "5"
+sha2 = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
 tauri-plugin-dialog = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Più file scelti in Esplora file avviano Halo una volta per file: la prima istanza li raccoglie tutti.
+tauri-plugin-single-instance = "2"

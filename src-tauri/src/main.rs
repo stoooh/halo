@@ -23,6 +23,7 @@ mod oscura;
 mod rapide;
 mod scegli;
 mod scorciatoie;
+mod sistema;
 mod sottotitoli;
 mod storia;
 mod traduci;
@@ -31,7 +32,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct Target {
     path: String,
     name: String,
@@ -53,12 +54,16 @@ fn target_files() -> Vec<Target> {
         Some(k) => args[k + 1..].to_vec(),
         None => args.into_iter().filter(|a| !a.starts_with('-')).collect(),
     };
-    files.into_iter().filter_map(|a| std::fs::canonicalize(Path::new(&a)).ok())
+    let mut v: Vec<Target> = files.into_iter().filter_map(|a| std::fs::canonicalize(Path::new(&a)).ok())
         .map(|abs| Target {
             name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
             kind: actions::kind_of(&abs).to_string(),
             path: abs.to_string_lossy().into_owned(),
-        }).collect()
+        }).collect();
+    for e in EXTRA.lock().unwrap().iter() {
+        if !v.iter().any(|x| x.path == e.path) { v.push(e.clone()); }
+    }
+    v
 }
 
 /// Azioni «Insieme» su più file (ZIP, rinomina in serie, unisci, copia percorsi).
@@ -223,9 +228,37 @@ fn translate_open(path: String, key: String, lingua: String, tool: String, forma
 /// Prima posizione del menu passata da chi avvia Halo (`--pos=X,Y`, coordinate nella finestra).
 #[tauri::command]
 fn start_position() -> Option<(f64, f64)> {
+    // Su Windows la calcola Halo stesso all'avvio (vedi place_on_cursor).
+    if let Some(p) = *START_POS.lock().unwrap() { return Some(p); }
     let v = std::env::args().find_map(|a| a.strip_prefix("--pos=").map(String::from))?;
     let (x, y) = v.split_once(',')?;
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?)).filter(|(x, y): &(f64, f64)| x.is_finite() && y.is_finite() && *x >= 0.0 && *y >= 0.0)
+}
+
+/// Posizione del puntatore nella finestra (pixel CSS), calcolata all'avvio su Windows.
+static START_POS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
+/// File arrivati da altre istanze (Windows, selezione multipla in Esplora file).
+static EXTRA: std::sync::Mutex<Vec<Target>> = std::sync::Mutex::new(Vec::new());
+
+/// Windows: la finestra (nascosta all'avvio, vedi tauri.windows.conf.json) va a tutto schermo sul
+/// monitor dove si trova il puntatore, poi si mostra; il menu si apre sotto il puntatore.
+#[cfg(windows)]
+fn place_on_cursor(app: &tauri::App) {
+    use tauri::Manager;
+    let Some(w) = app.get_webview_window("main") else { return };
+    if let Ok(cur) = app.cursor_position() {
+        if let Ok(Some(m)) = app.monitor_from_point(cur.x, cur.y) {
+            let _ = w.unmaximize();
+            let _ = w.set_position(*m.position());
+            let _ = w.maximize();
+        }
+        if let (Ok(pos), Ok(scale)) = (w.inner_position(), w.scale_factor()) {
+            let p = ((cur.x - pos.x as f64) / scale, (cur.y - pos.y as f64) / scale);
+            if p.0 >= 0.0 && p.1 >= 0.0 { *START_POS.lock().unwrap() = Some(p); }
+        }
+    }
+    let _ = w.show();
+    let _ = w.set_focus();
 }
 
 /// Avanzamento del lavoro in corso (0–1), se il programma lo dice.
@@ -250,14 +283,10 @@ fn hide_window(window: tauri::WebviewWindow) {
 /// Parte in un processo a sé, così resta attiva anche dopo la chiusura di Halo.
 #[tauri::command]
 fn notify_done(msg: String, files: Vec<String>, ok: bool) {
-    let uris: Vec<String> = files.iter().filter(|p| Path::new(p).exists()).map(|p| condividi::file_uri(Path::new(p))).collect();
-    let list = format!("[{}]", uris.iter().map(|u| format!("'{}'", u)).collect::<Vec<_>>().join(", "));
     let (title, body) = msg.split_once('\n').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or((msg.clone(), String::new()));
-    let script = r#"if [ "$3" = "[]" ]; then notify-send -a Halo -i halo "$1" "$2"; else
-a=$(notify-send -a Halo -i halo -A show="Mostra nella cartella" "$1" "$2"); [ "$a" = show ] && gdbus call --session --dest org.freedesktop.FileManager1 --object-path /org/freedesktop/FileManager1 --method org.freedesktop.FileManager1.ShowItems "$3" "" >/dev/null; fi"#;
     let t = if ok { title } else { format!("Halo: {}", title) };
-    let _ = std::process::Command::new("sh").args(["-c", script, "halo", &t, &body, &list])
-        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+    let files: Vec<std::path::PathBuf> = files.iter().map(std::path::PathBuf::from).collect();
+    sistema::notify(&t, &body, &files);
 }
 
 /// Cronologia delle operazioni (la più recente per prima).
@@ -281,13 +310,8 @@ fn history_trash(quando: u64) -> Result<String, String> {
 /// «Mostra nella cartella»: apre il gestore dei file con i risultati selezionati.
 #[tauri::command]
 fn show_in_folder(paths: Vec<String>) -> Result<(), String> {
-    let uris: Vec<String> = paths.iter().filter(|p| Path::new(p).exists()).map(|p| condividi::file_uri(Path::new(p))).collect();
-    if uris.is_empty() { return Err("Il file non c'è più.".into()); }
-    let list = format!("[{}]", uris.iter().map(|u| format!("'{}'", u)).collect::<Vec<_>>().join(", "));
-    std::process::Command::new("gdbus").args(["call", "--session", "--dest", "org.freedesktop.FileManager1", "--object-path",
-        "/org/freedesktop/FileManager1", "--method", "org.freedesktop.FileManager1.ShowItems", &list, ""])
-        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
-        .spawn().map(|_| ()).map_err(|e| e.to_string())
+    let paths: Vec<std::path::PathBuf> = paths.iter().map(std::path::PathBuf::from).collect();
+    sistema::show_in_folder(&paths)
 }
 
 /// Condividi: crea lo ZIP, lo copia negli appunti e restituisce le app a cui passarlo.
@@ -318,8 +342,31 @@ fn main() {
         println!("{}", configura::run());
         return;
     }
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        // Un'altra istanza (stessa selezione in Esplora file): i suoi file si aggiungono a questa.
+        use tauri::Emitter;
+        let files: Vec<Target> = argv.iter().skip(1).filter(|a| !a.starts_with('-'))
+            .filter_map(|a| std::fs::canonicalize(Path::new(a)).ok())
+            .map(|abs| Target { name: abs.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                kind: actions::kind_of(&abs).to_string(), path: abs.to_string_lossy().into_owned() })
+            .collect();
+        if !files.is_empty() {
+            // Conservati anche qui: se arrivano prima che il menu sia pronto, li legge target_files.
+            EXTRA.lock().unwrap().extend(files.iter().cloned());
+            let _ = app.emit("altri-file", files);
+        }
+    }));
+    builder
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // Su Windows la finestra si apre sul monitor del puntatore e il menu compare lì.
+            #[cfg(windows)]
+            place_on_cursor(app);
+            let _ = app;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![target_file, supported_actions, form_actions, planned_output, media_duration, current_value, redact_preview, pick_files, archive_entries, target_files, run_multi, show_in_folder, history_list, history_clear, history_trash, job_status, job_cancel, hide_window, notify_done, get_settings, save_settings, translate_tools, translate_open, start_position, list_apps, pick_program, run_shortcut, editor_preview, share_prepare, share_open, run_action])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Halo");
