@@ -152,7 +152,7 @@ fn upscale(input: &Path, app: &str) -> Result<String, String> {
         tmp.clone()
     };
     let out = out_path(input, "_4x", if fmt == "jpg" { &ext } else { fmt });
-    let o = Command::new(&bin).args(["-i", &s(&src), "-o", &s(&out), "-s", "4", "-m", &s(&models), "-n", &model, "-f", fmt])
+    let o = crate::sistema::no_window(Command::new(&bin)).args(["-i", &s(&src), "-o", &s(&out), "-s", "4", "-m", &s(&models), "-n", &model, "-f", fmt])
         .stdin(Stdio::null()).output();
     let _ = fs::remove_file(&tmp);
     let o = o.map_err(|e| format!("Upscayl non parte: {}", e))?;

@@ -61,5 +61,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Halo $GITHUB_REF_NAME" \
-            --notes "Linux (Ubuntu/GNOME): scarica Halo_*_amd64.deb e installa-halo.sh nella stessa cartella, poi: bash installa-halo.sh. Windows 10/11: avvia Halo_*_x64-setup.exe e rispondi Sì per installare i programmi necessari." \
+            --notes "Linux (Ubuntu/GNOME), nel terminale: curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/installa.sh | bash — Windows 10/11, in PowerShell: irm https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/installa.ps1 | iex — A mano: Halo_*_amd64.deb + installa-halo.sh (bash installa-halo.sh), oppure Halo_*_x64-setup.exe." \
             $(find dist -type f \( -name '*.deb' -o -name '*.exe' -o -name 'installa-halo.sh' \))

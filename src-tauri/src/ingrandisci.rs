@@ -1,5 +1,6 @@
 //! Immagine › Ridimensiona › Upscayl: Real-ESRGAN (realesrgan-ncnn-vulkan, lo stesso motore di
-//! Upscayl), incluso nel pacchetto in /usr/lib/halo/realesrgan. Funziona in locale, sulla scheda
+//! Upscayl), incluso nel pacchetto in /usr/lib/halo/realesrgan (Linux) o nella cartella
+//! realesrgan accanto a halo.exe (Windows). Funziona in locale, sulla scheda
 //! video (Vulkan). I modelli lavorano a 4×: 2× = 4× e poi metà; 6× e 8× = due passaggi
 //! (4×, riduzione a 1,5× o 2× dell'originale, di nuovo 4×), così anche il secondo ingrandimento
 //! ricostruisce i dettagli.
@@ -16,11 +17,13 @@ pub const KEYS: &[&str] = &["image/ridimensiona/upscayl"];
 const MAX_SIDE: u32 = 16000;
 const BIN: &str = "realesrgan-ncnn-vulkan";
 
-/// La cartella con programma e modelli: variabile HALO_REALESRGAN, pacchetto, oppure sorgenti.
+/// La cartella con programma e modelli: variabile HALO_REALESRGAN, pacchetto (Linux), accanto a
+/// halo.exe (Windows), oppure sorgenti.
 pub fn dir() -> Option<PathBuf> {
-    [std::env::var("HALO_REALESRGAN").ok().map(PathBuf::from), Some(PathBuf::from("/usr/lib/halo/realesrgan")),
+    let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("realesrgan")));
+    [std::env::var("HALO_REALESRGAN").ok().map(PathBuf::from), Some(PathBuf::from("/usr/lib/halo/realesrgan")), exe_dir,
         Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("risorse/realesrgan"))]
-        .into_iter().flatten().find(|d| d.join(BIN).is_file())
+        .into_iter().flatten().find(|d| d.join(crate::sistema::exe(BIN)).is_file())
 }
 
 /// Scala (2 o 4) e modello dai dati del pannello.
@@ -42,20 +45,21 @@ fn pass(d: &Path, src: &Path, dst: &Path, modello: &str, fmt: Option<&str>, tmp:
     let mut args = vec!["-i".to_string(), s(src), "-o".into(), s(dst), "-n".into(), modello.into(), "-s".into(), "4".into(), "-m".into(), s(&d.join("models"))];
     if let Some(f) = fmt { args.extend(["-f".to_string(), f.to_string()]); }
     // Real-ESRGAN scrive l'avanzamento come «12,50%» sull'errore standard.
-    let (status, _, e) = crate::lavoro::run_lines(Command::new(d.join(BIN)).args(&args).current_dir(tmp), true, |l| {
+    let (status, _, e) = crate::lavoro::run_lines(crate::sistema::no_window(Command::new(d.join(crate::sistema::exe(BIN)))).args(&args).current_dir(tmp), true, |l| {
         if let Some(p) = l.strip_suffix('%').and_then(|v| v.trim().replace(',', ".").parse::<f64>().ok()) { crate::lavoro::set(p / 100.0); }
     }).map_err(|e| format!("Il programma di ingrandimento non parte: {}", e))?;
     if crate::lavoro::cancelled() { return Err("Annullato.".into()); }
     if status.success() && dst.is_file() { return Ok(()); }
     if e.contains("vkCreateInstance") || e.contains("invalid gpu") {
-        return Err("Serve una scheda video compatibile con Vulkan (o il pacchetto mesa-vulkan-drivers).".to_string());
+        return Err(if cfg!(windows) { "Serve una scheda video compatibile con Vulkan: aggiorna i driver della scheda video." }
+            else { "Serve una scheda video compatibile con Vulkan (o il pacchetto mesa-vulkan-drivers)." }.to_string());
     }
     Err(format!("Ingrandimento non riuscito: {}", e.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("errore sconosciuto").trim()))
 }
 
 pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<String, String> {
     if kind_of(input) != "image" { return Err("Funziona con le immagini.".into()); }
-    let d = dir().ok_or(if cfg!(windows) { "Upscayl non è ancora disponibile nella versione per Windows." } else { "Manca il programma di ingrandimento: reinstalla Halo." })?;
+    let d = dir().ok_or("Manca il programma di ingrandimento: reinstalla Halo.")?;
     let (scala, modello) = options(data);
     let out = planned_out(input, key, data).ok_or("Opzione non disponibile.")?;
     let fmt = out.extension().and_then(|e| e.to_str()).map(|e| if e == "jpeg" { "jpg" } else { e }).unwrap_or("png").to_string();

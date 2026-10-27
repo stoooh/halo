@@ -11,11 +11,15 @@ use std::process::{Command, Stdio};
 /// (ImageMagick 7 è «magick», Ghostscript «gswin64c») o stanno in Programmi senza essere nel PATH.
 pub fn cmd(name: &str) -> Command {
     let (prog, pre) = resolve(name);
-    let mut c = Command::new(prog);
+    let mut c = no_window(Command::new(prog));
     c.args(pre);
+    c
+}
+
+/// Su Windows niente finestra nera del terminale per il programma lanciato.
+pub fn no_window(#[cfg_attr(not(windows), allow(unused_mut))] mut c: Command) -> Command {
     #[cfg(windows)]
     {
-        // Niente finestra nera del terminale per ogni programma lanciato.
         use std::os::windows::process::CommandExt;
         c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
@@ -43,6 +47,25 @@ pub fn absolute(p: &Path) -> Option<PathBuf> {
         if let Some(rest) = t.strip_prefix(r"\\?\") { return Some(PathBuf::from(rest)); }
     }
     Some(abs)
+}
+
+/// Salva un JPEG o PNG come HEIC (qualità 85). Su Linux heif-enc (libheif); su Windows, dove
+/// heif-enc non c'è e ImageMagick gli HEIC li legge ma non li scrive, la libreria Python
+/// pillow-heif, che contiene lo stesso codificatore (x265).
+pub fn heic(src: &Path, out: &Path) -> Result<(), String> {
+    if !cfg!(windows) {
+        return crate::actions::run_cmd("heif-enc", &["-q", "85", &src.to_string_lossy(), "-o", &out.to_string_lossy()]).map(|_| ())
+            .map_err(|e| if e.contains("No HEVC encoder") { "Manca il codificatore HEIC. Installa con: sudo apt install libheif-plugin-x265".to_string() } else { e });
+    }
+    const SCRIPT: &str = "import sys\nfrom PIL import Image\nimport pillow_heif\npillow_heif.register_heif_opener()\n\
+        Image.open(sys.argv[1]).save(sys.argv[2], format='HEIF', quality=85)\n";
+    let o = python().args(["-c", SCRIPT]).arg(src).arg(out).output().map_err(|_| crate::actions::missing("python3"))?;
+    if o.status.success() && out.is_file() { return Ok(()); }
+    let err = String::from_utf8_lossy(&o.stderr);
+    if err.contains("No module named") {
+        return Err(format!("Manca il codificatore HEIC. Installa con: {}", pip_hint("pillow-heif")));
+    }
+    Err(format!("Conversione in HEIC non riuscita: {}", err.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("errore sconosciuto").trim()))
 }
 
 /// Come si installa una libreria Python che manca.
@@ -77,6 +100,12 @@ fn resolve(name: &str) -> (PathBuf, Vec<&'static str>) {
         "tesseract" => (find_program("tesseract").or_else(|| pf("Tesseract-OCR\\tesseract.exe")).unwrap_or_else(|| "tesseract".into()), vec![]),
         // Il lanciatore di Python per Windows («py -3»), altrimenti «python».
         "python3" => match find_program("py") { Some(p) => (p, vec!["-3"]), None => ("python".into(), vec![]) },
+        // ocrmypdf installato con pip --user: il comando non è nel PATH, il modulo sì.
+        "ocrmypdf" => match (find_program("ocrmypdf"), find_program("py")) {
+            (Some(p), _) => (p, vec![]),
+            (None, Some(py)) => (py, vec!["-3", "-m", "ocrmypdf"]),
+            (None, None) => ("ocrmypdf".into(), vec![]),
+        },
         _ => (find_program(name).unwrap_or_else(|| name.into()), vec![]),
     }
 }
@@ -294,6 +323,101 @@ pub fn clipboard_file(file: &Path) -> Result<(), String> {
             .map_err(|_| "Manca «wl-copy». Installa con: sudo apt install wl-clipboard".to_string())?;
         if st.success() { Ok(()) } else { Err("Non sono riuscito a copiare il file negli appunti.".into()) }
     }
+}
+
+/// Windows: apre il pannello «Condividi» di sistema (WhatsApp, Outlook, Condivisione nelle
+/// vicinanze…) con il file, oppure con il link se c'è. Halo smette di stare sopra le altre
+/// finestre, altrimenti coprirebbe il pannello. Il pannello si chiude con la finestra che lo ha
+/// aperto: finché è aperto, la chiusura automatica del menu aspetta.
+#[cfg(windows)]
+pub fn share_ui(window: &tauri::WebviewWindow, file: &Path, link: Option<&str>) -> Result<(), String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+    use windows::core::{Interface, HSTRING};
+    use windows::ApplicationModel::DataTransfer::{DataRequestedEventArgs, DataTransferManager};
+    use windows::Foundation::TypedEventHandler;
+    use windows_collections::IIterable;
+    use windows::Storage::{IStorageItem, StorageFile};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Shell::IDataTransferManagerInterop;
+
+    /// Cosa condividere: il gestore dell'evento si registra una volta sola e legge da qui.
+    static DA_CONDIVIDERE: Mutex<Option<(PathBuf, Option<String>)>> = Mutex::new(None);
+    static REGISTRATO: AtomicBool = AtomicBool::new(false);
+    /// Pannello aperto; chiusura del menu chiesta nel frattempo.
+    static APERTO: AtomicBool = AtomicBool::new(false);
+    static RIMANDATA: AtomicBool = AtomicBool::new(false);
+    static FINESTRA: Mutex<Option<tauri::WebviewWindow>> = Mutex::new(None);
+
+    /// Condivisione finita o annullata: se il menu voleva chiudersi, ora si chiude.
+    fn fine() {
+        APERTO.store(false, Ordering::SeqCst);
+        if RIMANDATA.swap(false, Ordering::SeqCst) {
+            if let Some(w) = FINESTRA.lock().unwrap().clone() { let _ = w.close(); }
+        }
+    }
+
+    fn fill(args: &DataRequestedEventArgs) -> windows::core::Result<()> {
+        let Some((file, link)) = DA_CONDIVIDERE.lock().unwrap().clone() else { return Ok(()) };
+        let req = args.Request()?;
+        let data = req.Data()?;
+        data.ShareCompleted(&TypedEventHandler::new(|_, _| { fine(); Ok(()) }))?;
+        data.ShareCanceled(&TypedEventHandler::new(|_, _| { fine(); Ok(()) }))?;
+        let nome = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        data.Properties()?.SetTitle(&HSTRING::from(nome))?;
+        if let Some(l) = link {
+            return data.SetText(&HSTRING::from(l));
+        }
+        let f = StorageFile::GetFileFromPathAsync(&HSTRING::from(file.as_os_str()))?.join()?;
+        let items: IIterable<IStorageItem> = vec![Some(f.cast::<IStorageItem>()?)].into();
+        data.SetStorageItemsReadOnly(&items)
+    }
+
+    *DA_CONDIVIDERE.lock().unwrap() = Some((file.to_path_buf(), link.map(String::from)));
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    let _ = window.set_always_on_top(false);
+    if FINESTRA.lock().unwrap().replace(window.clone()).is_none() {
+        window.on_window_event(|e| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = e {
+                if APERTO.load(Ordering::SeqCst) { api.prevent_close(); RIMANDATA.store(true, Ordering::SeqCst); }
+            }
+        });
+    }
+    APERTO.store(true, Ordering::SeqCst);
+    // Se Windows non avvisa della fine, dopo 3 minuti il menu si chiude comunque.
+    static GIRO: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let giro = GIRO.fetch_add(1, Ordering::SeqCst) + 1;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(180));
+        if GIRO.load(Ordering::SeqCst) == giro { fine(); }
+    });
+    // Le API del pannello vanno chiamate dal thread della finestra.
+    let (tx, rx) = std::sync::mpsc::channel();
+    window.run_on_main_thread(move || {
+        let r = (|| -> windows::core::Result<()> {
+            let hwnd = HWND(hwnd as _);
+            let interop = windows::core::factory::<DataTransferManager, IDataTransferManagerInterop>()?;
+            if !REGISTRATO.load(Ordering::SeqCst) {
+                let dtm: DataTransferManager = unsafe { interop.GetForWindow(hwnd)? };
+                dtm.DataRequested(&TypedEventHandler::new(|_, args: windows::core::Ref<DataRequestedEventArgs>| {
+                    if let Some(a) = args.as_ref() { fill(a)?; }
+                    Ok(())
+                }))?;
+                REGISTRATO.store(true, Ordering::SeqCst);
+            }
+            unsafe { interop.ShowShareUIForWindow(hwnd) }
+        })();
+        let _ = tx.send(r.map_err(|e| e.message()));
+    }).map_err(|e| e.to_string())?;
+    let r = rx.recv().map_err(|e| e.to_string())?.map_err(|e| format!("Il pannello «Condividi» di Windows non si apre: {}", e));
+    if r.is_err() { fine(); }
+    r
+}
+
+/// Su Linux le app si aprono una per una: la voce del pannello di sistema non c'è.
+#[cfg(not(windows))]
+pub fn share_ui(_window: &tauri::WebviewWindow, _file: &Path, _link: Option<&str>) -> Result<(), String> {
+    Err("Il pannello «Condividi» c'è solo su Windows.".into())
 }
 
 #[cfg(windows)]

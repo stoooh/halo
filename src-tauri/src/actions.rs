@@ -761,20 +761,17 @@ fn run_inner(path: &str, key: &str, data: &HashMap<String, String>) -> Result<St
         k if crate::ingrandisci::KEYS.contains(&k) => crate::ingrandisci::run(&input, k, data),
         k if crate::traduci::KEYS.contains(&k) => Err("Traduci si usa dal pannello: scegli lo strumento e premi Apri.".into()),
         "image/converti/heic" => {
-            // heif-enc legge JPEG e PNG; gli altri formati passano prima da un PNG temporaneo.
-            // Su Windows heif-enc non c'è e ImageMagick legge gli HEIC ma non li scrive.
-            if cfg!(windows) { return Err("Manca il codificatore HEIC: su Windows la conversione in HEIC non è ancora disponibile.".into()); }
+            // Il codificatore legge JPEG e PNG; gli altri formati passano prima da un PNG temporaneo.
             let out = planned()?;
             let tmp = std::env::temp_dir().join(format!("halo-heic-{}.png", std::process::id()));
             let src = if ["jpg", "jpeg", "png"].contains(&ext.as_str()) { input.clone() } else {
                 run_cmd("convert", &[&format!("{}[0]", i), &s(&tmp)])?;
                 tmp.clone()
             };
-            let r = run_cmd("heif-enc", &["-q", "85", &s(&src), "-o", &s(&out)]);
+            let r = crate::sistema::heic(&src, &out);
             let _ = fs::remove_file(&tmp);
-            r.map_err(|e| if e.contains("No HEVC encoder") {
-                "Manca il codificatore HEIC. Installa con: sudo apt install libheif-plugin-x265".to_string()
-            } else { e })?;
+            if r.is_err() { let _ = fs::remove_file(&out); }
+            r?;
             done(&out)
         }
 
@@ -900,6 +897,7 @@ fn winget_for(cmd: &str) -> &'static str {
         "7z" => "winget install 7zip.7zip",
         "exiftool" => "winget install OliverBetz.ExifTool",
         "tesseract" => "winget install UB-Mannheim.TesseractOCR",
+        "ocrmypdf" => "py -m pip install --user ocrmypdf",
         "python3" => "winget install Python.Python.3.12 (poi: py -m pip install openpyxl msoffcrypto-tool)",
         _ => "il programma corrispondente (vedi README, sezione Windows)",
     }

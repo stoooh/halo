@@ -1,10 +1,16 @@
 Programma di ingrandimento usato da Immagine › Ridimensiona › Ingrandisci.
 
 Origine: https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0
-File:    realesrgan-ncnn-vulkan-20220424-ubuntu.zip (46.931.474 byte)
-SHA-256: e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96
 
-Tenuti dall'archivio: realesrgan-ncnn-vulkan, models/realesrgan-x4plus.* (foto),
-models/realesrgan-x4plus-anime.* (disegni), README_ubuntu.md.
+Linux:   realesrgan-ncnn-vulkan-20220424-ubuntu.zip (46.931.474 byte)
+SHA-256: e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96
+Tenuti:  realesrgan-ncnn-vulkan, README_ubuntu.md.
+
+Windows: realesrgan-ncnn-vulkan-20220424-windows.zip (45.474.481 byte)
+SHA-256: abc02804e17982a3be33675e4d471e91ea374e65b70167abc09e31acb412802d
+Tenuti:  realesrgan-ncnn-vulkan.exe, vcomp140.dll, vcomp140d.dll, README_windows.md.
+
+Modelli (uguali byte per byte nei due archivi): models/realesrgan-x4plus.* (foto),
+models/realesrgan-x4plus-anime.* (disegni).
 Licenze: Real-ESRGAN BSD-3-Clause (LICENSE-Real-ESRGAN.txt), Real-ESRGAN-ncnn-vulkan MIT
 (LICENSE-ncnn-vulkan.txt).

@@ -25,6 +25,7 @@ fn langs() -> String {
 
 fn missing_ita() -> &'static str {
     if run_cmd("tesseract", &["--list-langs"]).unwrap_or_default().lines().any(|l| l.trim() == "ita") { "" }
+    else if cfg!(windows) { " (per l'italiano rilancia dipendenze.ps1 dalla cartella di Halo)" }
     else { " (per l'italiano installa anche: sudo apt install tesseract-ocr-ita)" }
 }
 
@@ -40,7 +41,8 @@ pub fn run(input: &Path, key: &str) -> Result<String, String> {
             let r = run_cmd("ocrmypdf", &["-q", "-l", &langs(), "--skip-text", "--output-type", "pdf", &s(input), &s(&out)]);
             if let Err(e) = r {
                 let _ = fs::remove_file(&out);
-                return Err(if e.contains("Manca") { "Manca ocrmypdf. Installa con: sudo apt install ocrmypdf tesseract-ocr-ita".into() }
+                // Su Windows senza il modulo risponde Python: «No module named ocrmypdf».
+                return Err(if e.contains("Manca") || e.contains("No module named ocrmypdf") { crate::actions::missing("ocrmypdf") }
                     else if e.contains("encrypted") || e.contains("password") { "Il PDF è protetto da password: toglila prima.".into() } else { e });
             }
             let words = run_cmd("pdftotext", &[&s(&out), "-"]).unwrap_or_default().split_whitespace().count();
@@ -52,7 +54,7 @@ pub fn run(input: &Path, key: &str) -> Result<String, String> {
             run_cmd("convert", &[&format!("{}[0]", s(input)), "-auto-orient", "-colorspace", "Gray", &s(&tmp)])?;
             let r = run_cmd("tesseract", &[&s(&tmp), "stdout", "-l", &langs()]);
             let _ = fs::remove_file(&tmp);
-            let text = r.map_err(|e| if e.contains("Manca") { "Manca Tesseract. Installa con: sudo apt install tesseract-ocr tesseract-ocr-ita".to_string() } else { e })?;
+            let text = r?;
             let words = text.split_whitespace().count();
             if words == 0 { return Err("Nessun testo riconosciuto nell'immagine: nessun file creato.".into()); }
             fs::write(&out, text.trim_end().to_string() + "\n").map_err(|e| e.to_string())?;
@@ -74,7 +76,8 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         // Una «foto» di un documento: testo disegnato come immagine, e un PDF fatto solo di quell'immagine.
         let img = dir.join("scansione.png");
-        run_cmd("convert", &["-size", "1400x500", "xc:white", "-font", "DejaVu-Sans", "-pointsize", "48", "-fill", "black",
+        let font = if cfg!(windows) { "Arial" } else { "DejaVu-Sans" };
+        run_cmd("convert", &["-size", "1400x500", "xc:white", "-font", font, "-pointsize", "48", "-fill", "black",
             "-annotate", "+60+150", "Contratto di collaborazione", "-annotate", "+60+260", "Pagamento entro trenta giorni", &s(&img)]).unwrap();
         let pdf = dir.join("scansione.pdf");
         run_cmd("convert", &[&s(&img), "-density", "150", &s(&pdf)]).unwrap();

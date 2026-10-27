@@ -355,8 +355,8 @@ async fn share_prepare(path: String, key: String) -> Result<condividi::Pronto, S
 
 /// Condividi: apre l'app scelta nel pannello.
 #[tauri::command]
-fn share_open(id: String) -> Result<String, String> {
-    condividi::open(&id)
+fn share_open(window: tauri::WebviewWindow, id: String) -> Result<String, String> {
+    condividi::open(&id, &window)
 }
 
 /// Esegue un'azione fuori dal thread dell'interfaccia; `data` sono i campi del pannello.

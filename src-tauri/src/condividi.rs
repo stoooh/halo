@@ -45,6 +45,8 @@ enum Avvio {
     Url(String),
     /// Mostra il file nel gestore dei file.
     Mostra,
+    /// Windows: il pannello «Condividi» di sistema, con le app che ricevono file o link.
+    Sistema,
 }
 
 #[derive(Serialize)]
@@ -141,7 +143,7 @@ pub(crate) fn copy_text(text: &str) -> Result<(), String> {
 }
 
 /// Apre l'app scelta nel pannello.
-pub fn open(id: &str) -> Result<String, String> {
+pub fn open(id: &str, window: &tauri::WebviewWindow) -> Result<String, String> {
     let (file, link, app) = PREPARATO.lock().unwrap().clone().ok_or("Prepara prima il file da condividere.")?;
     let a = app.into_iter().find(|a| a.id == id).ok_or("App non trovata.")?;
     let uri = file_uri(&file);
@@ -160,6 +162,10 @@ pub fn open(id: &str) -> Result<String, String> {
         }
         Avvio::Mostra => crate::sistema::show_in_folder(&[file.clone()]).map_err(|_| "Non riesco ad aprire la cartella.".to_string())?,
         Avvio::Desktop(d) => spawn("/usr/bin/gio", &["launch".to_string(), s(d)]).map_err(|_| format!("Non riesco ad aprire {}.", a.nome))?,
+        Avvio::Sistema => {
+            crate::sistema::share_ui(window, &file, link.as_deref())?;
+            return Ok("Scegli l'app nel pannello «Condividi» di Windows.".into());
+        }
     }
     if link.is_some() {
         return Ok(match a.come {
@@ -300,6 +306,10 @@ fn apps(modo: Modo, entries: &[Entry]) -> Vec<App> {
         add(&mut v, "bluetooth", "Bluetooth", "file", Avvio::Cmd("/usr/bin/bluetooth-sendto".into(), vec!["{file}".into()]));
     }
     v.sort_by_key(|a| (a.come != "file" && a.come != "link", a.nome.to_lowercase()));
+    // Su Windows le app non hanno file .desktop: il pannello di sistema le propone tutte.
+    if cfg!(windows) {
+        add(&mut v, "windows", "Altre app (Condividi di Windows)", if link { "link" } else { "file" }, Avvio::Sistema);
+    }
     if link {
         add(&mut v, "browser", "Apri nel browser", "link", Avvio::Url("{link}".into()));
         return v;
@@ -334,11 +344,14 @@ mod tests {
         let Avvio::Cmd(p, a) = &altro.iter().find(|a| a.nome == "Telegram").unwrap().avvio else { panic!() };
         assert_eq!((p.as_str(), a.as_slice()), ("/opt/Telegram/Telegram", ["-sendpath".to_string(), "{file}".to_string()].as_slice()));
 
+        // Su Windows, prima delle voci finali, il pannello «Condividi» di sistema.
+        let win: &[(&str, &str)] = if cfg!(windows) { &[("windows", "link")] } else { &[] };
         let email: Vec<String> = apps(Modo::Email, &all).into_iter().map(|a| a.id).collect();
-        assert_eq!(email, ["thunderbird", "gmail", "cartella"]);
+        assert_eq!(email, [&["thunderbird", "gmail"][..], &win.iter().map(|w| w.0).collect::<Vec<_>>(), &["cartella"]].concat());
         let link: Vec<(String, &str)> = apps(Modo::Link, &all).into_iter().map(|a| (a.id, a.come)).collect();
         assert_eq!(link.iter().map(|(i, c)| (i.as_str(), *c)).collect::<Vec<_>>(),
-            [("gmail", "link"), ("org.telegram.desktop", "link"), ("thunderbird", "link"), ("org.signal.Signal", "incolla"), ("chrome-x", "incolla"), ("browser", "link")]);
+            [&[("gmail", "link"), ("org.telegram.desktop", "link"), ("thunderbird", "link"), ("org.signal.Signal", "incolla"), ("chrome-x", "incolla")][..],
+                win, &[("browser", "link")]].concat());
         assert_eq!(encode("https://gofile.io/d/Ab1", b"-._~"), "https%3A%2F%2Fgofile.io%2Fd%2FAb1");
         assert_eq!(file_uri(Path::new("/tmp/Foto è 1.zip")), "file:///tmp/Foto%20%C3%A8%201.zip");
     }

@@ -25,12 +25,15 @@ pub fn planned_out(input: &Path, key: &str) -> Option<PathBuf> {
     })
 }
 
-/// Il programma di whisper.cpp (il nome cambia tra le versioni).
-fn whisper_bin() -> Result<String, String> {
+/// Il programma di whisper.cpp (il nome cambia tra le versioni). Su Windows lo mette
+/// dipendenze.ps1 in whisper\bin, accanto ai modelli.
+fn whisper_bin() -> Result<PathBuf, String> {
+    let installed = cache().join("bin").join(crate::sistema::exe("whisper-cli"));
+    if installed.is_file() { return Ok(installed); }
     for b in ["whisper-cli", "whisper-cpp", "whisper.cpp", "whisper"] {
-        if let Some(p) = crate::sistema::find_program(b) { return Ok(p.to_string_lossy().into_owned()); }
+        if let Some(p) = crate::sistema::find_program(b) { return Ok(p); }
     }
-    Err(if cfg!(windows) { "Manca whisper.cpp: scarica whisper-bin-x64.zip da github.com/ggml-org/whisper.cpp e metti la cartella nel PATH.".into() }
+    Err(if cfg!(windows) { "Manca whisper.cpp: rilancia dipendenze.ps1 dalla cartella di Halo.".into() }
         else { "Manca whisper.cpp. Installa con: sudo apt install whisper.cpp".into() })
 }
 
@@ -68,7 +71,7 @@ fn transcribe(input: &Path, dir: &Path, data: &HashMap<String, String>) -> Resul
     crate::lavoro::range(0.1, 0.85);
     let prefix = dir.join("sottotitoli");
     let threads = std::thread::available_parallelism().map(|n| n.get().min(8)).unwrap_or(4).to_string();
-    let (st, _, err) = crate::lavoro::run_lines(Command::new(&bin).args(["-m", &s(&modello), "-f", &s(&wav), "-l", lingua,
+    let (st, _, err) = crate::lavoro::run_lines(crate::sistema::no_window(Command::new(&bin)).args(["-m", &s(&modello), "-f", &s(&wav), "-l", lingua,
         "-t", &threads, "-osrt", "-of", &s(&prefix), "-pp"]), true, |l| {
         // «… progress =  42%»
         if let Some(p) = l.split("progress =").nth(1).and_then(|v| v.trim().trim_end_matches('%').trim().parse::<f64>().ok()) {
@@ -93,7 +96,8 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
     fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let r = (|| {
         let srt = transcribe(input, &tmp, data)?;
-        let righe = fs::read_to_string(&srt).unwrap_or_default().split("\n\n").filter(|b| !b.trim().is_empty()).count();
+        // Su Windows whisper.cpp va a capo con «\r\n».
+        let righe = fs::read_to_string(&srt).unwrap_or_default().replace("\r\n", "\n").split("\n\n").filter(|b| !b.trim().is_empty()).count();
         crate::lavoro::range(0.95, 0.05);
         match key {
             "video/sottotitoli/crea-srt" => { fs::copy(&srt, &out).map_err(|e| e.to_string())?; }
@@ -111,7 +115,7 @@ pub fn run(input: &Path, key: &str, data: &HashMap<String, String>) -> Result<St
                 let mut full = vec!["-hide_banner", "-nostdin", "-n", "-i"];
                 let i = s(input); let o = s(&out);
                 full.push(&i); full.extend(args); full.push(&o);
-                let st = crate::lavoro::run_lines(Command::new("ffmpeg").args(&full).current_dir(&tmp), true, |_| {}).map_err(|e| e.to_string())?;
+                let st = crate::lavoro::run_lines(crate::sistema::cmd("ffmpeg").args(&full).current_dir(&tmp), true, |_| {}).map_err(|e| e.to_string())?;
                 if !st.0.success() { return Err("ffmpeg non è riuscito a imprimere i sottotitoli.".into()); }
             }
         }
@@ -133,27 +137,38 @@ mod tests {
         assert_eq!(name(&planned_out(Path::new("/x/Demo.mov"), KEYS[2]).unwrap()), "Demo_sottotitoli.mov");
     }
 
-    /// Prova vera: serve whisper.cpp e il modello «base» già scaricato in ~/.cache/halo/whisper.
-    /// La voce di prova la crea espeak-ng se c'è (HALO_VOCE=/percorso/file.wav per usarne un'altra).
+    /// Prova vera: serve whisper.cpp (il modello «base» si scarica al primo uso).
+    /// La voce di prova la crea espeak-ng su Linux, la sintesi vocale di sistema su Windows
+    /// (HALO_VOCE=/percorso/file.wav per usarne un'altra).
     #[test]
     #[ignore]
     fn file_veri() {
         let dir = std::env::temp_dir().join("halo-test-sottotitoli");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
+        // Windows ha di solito solo la voce inglese: lì si prova in inglese.
+        let (frase, lingua, parole) = if cfg!(windows) { ("Good morning everyone, this is a subtitle test.", "en", ["morning", "test"]) }
+            else { ("Buongiorno a tutti, questa è una prova dei sottotitoli.", "it", ["buongiorno", "prova"]) };
         let voce = std::env::var("HALO_VOCE").map(PathBuf::from).unwrap_or_else(|_| {
             let w = dir.join("voce.wav");
-            run_cmd("espeak-ng", &["-v", "it", "-w", &s(&w), "Buongiorno a tutti, questa è una prova dei sottotitoli."]).expect("serve espeak-ng o HALO_VOCE");
+            if cfg!(windows) {
+                let ps = format!("Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; \
+                    $s.SetOutputToWaveFile('{}'); $s.Speak('{}'); $s.Dispose()", s(&w), frase);
+                let o = Command::new("powershell").args(["-NoProfile", "-Command", &ps]).output().unwrap();
+                assert!(o.status.success() && w.is_file(), "sintesi vocale: {}", String::from_utf8_lossy(&o.stderr));
+            } else {
+                run_cmd("espeak-ng", &["-v", "it", "-w", &s(&w), frase]).expect("serve espeak-ng o HALO_VOCE");
+            }
             w
         });
         let v = dir.join("Prova.mp4");
         run_cmd("ffmpeg", &["-hide_banner", "-nostdin", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25", "-i", &s(&voce),
             "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", &s(&v)]).unwrap();
-        let d = HashMap::from([("lingua".to_string(), "it".to_string()), ("modello".to_string(), "base".to_string())]);
+        let d = HashMap::from([("lingua".to_string(), lingua.to_string()), ("modello".to_string(), "base".to_string())]);
         let r = run(&v, KEYS[0], &d).unwrap();
         assert!(r.starts_with("Creato: Prova.srt"), "{}", r);
         let t = fs::read_to_string(dir.join("Prova.srt")).unwrap().to_lowercase();
-        assert!(t.contains("-->") && (t.contains("prova") || t.contains("buongiorno")), "{}", t);
+        assert!(t.contains("-->") && parole.iter().any(|p| t.contains(p)), "{}", t);
         assert!(run(&v, KEYS[1], &d).unwrap().starts_with("Creato: Prova_sottotitoli.mp4"));
         let streams = run_cmd("ffprobe", &["-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", &s(&dir.join("Prova_sottotitoli.mp4"))]).unwrap();
         assert!(streams.contains("subtitle"), "{}", streams);

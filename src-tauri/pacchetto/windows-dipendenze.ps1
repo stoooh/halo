@@ -1,6 +1,8 @@
 ﻿# Halo per Windows: installa i programmi che servono alle azioni (con winget, già presente in
-# Windows 10/11) e le librerie Python per i fogli Excel. Lo avvia l'installer di Halo, se scegli «Sì».
+# Windows 10/11), whisper.cpp e le librerie Python (fogli Excel, OCR dei PDF, HEIC).
+# Lo avvia l'installer di Halo, se scegli «Sì», oppure installa.ps1 con -Silenzioso (senza pause).
 # Si può rilanciare quando vuoi: i programmi già installati vengono saltati.
+param([switch]$Silenzioso)
 
 $ErrorActionPreference = 'Continue'
 $Host.UI.RawUI.WindowTitle = 'Halo - programmi necessari'
@@ -22,7 +24,7 @@ $pacchetti = @(
 
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
   Write-Host "Manca winget: installa «Programma di installazione app» dal Microsoft Store, poi rilancia questo script." -ForegroundColor Red
-  Read-Host "Premi Invio per chiudere"
+  if (-not $Silenzioso) { Read-Host "Premi Invio per chiudere" }
   exit 1
 }
 
@@ -71,17 +73,41 @@ if ((Test-Path $tessdata) -and -not (Test-Path "$tessdata\ita.traineddata")) {
     Write-Host " NON riuscito ($($_.Exception.Message))" -ForegroundColor Yellow
   }
 }
+
+# Sottotitoli: whisper.cpp ufficiale per Windows (le versioni con i programmi sono quelle «bNNNN»),
+# nella cartella dei dati di Halo, accanto ai modelli che Halo scarica al primo uso.
+$whisper = Join-Path $env:LOCALAPPDATA 'Halo\whisper\bin'
+Write-Host "- whisper.cpp (sottotitoli)..." -NoNewline
+if (Test-Path "$whisper\whisper-cli.exe") {
+  Write-Host " già installato" -ForegroundColor Green
+} else {
+  try {
+    $rels = Invoke-RestMethod 'https://api.github.com/repos/ggml-org/whisper.cpp/releases?per_page=15' -Headers @{ 'User-Agent' = 'Halo' }
+    $asset = $rels | ForEach-Object { $_.assets } | Where-Object name -EQ 'whisper-bin-x64.zip' | Select-Object -First 1
+    if (-not $asset) { throw "versione per Windows non trovata" }
+    $zip = Join-Path $tmp $asset.name
+    Invoke-WebRequest $asset.browser_download_url -OutFile $zip
+    Expand-Archive $zip (Join-Path $tmp 'whisper') -Force
+    $cli = Get-ChildItem (Join-Path $tmp 'whisper') -Recurse -Filter 'whisper-cli.exe' | Select-Object -First 1
+    if (-not $cli) { throw "whisper-cli.exe non trovato nell'archivio" }
+    New-Item -ItemType Directory -Force $whisper | Out-Null
+    Copy-Item "$($cli.DirectoryName)\*" $whisper -Recurse -Force
+    Write-Host " installato" -ForegroundColor Green
+  } catch {
+    Write-Host " NON riuscito ($($_.Exception.Message))" -ForegroundColor Yellow
+  }
+}
 Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 
-# Librerie Python per Pulisci, Ordina, Grafico e Proteggi dei fogli Excel.
+# Librerie Python: fogli Excel (openpyxl, msoffcrypto-tool), OCR dei PDF (ocrmypdf), HEIC (pillow-heif).
 $py = Get-Command py -ErrorAction SilentlyContinue
 if (-not $py) { $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine'); $py = Get-Command py -ErrorAction SilentlyContinue }
 if ($py) {
-  Write-Host "- Librerie Python (openpyxl, msoffcrypto-tool)..." -NoNewline
-  & py -3 -m pip install --user --quiet openpyxl msoffcrypto-tool 2>$null
+  Write-Host "- Librerie Python (Excel, OCR dei PDF, HEIC)..." -NoNewline
+  & py -3 -m pip install --user --quiet --disable-pip-version-check openpyxl msoffcrypto-tool ocrmypdf pillow-heif 2>$null
   if ($LASTEXITCODE -eq 0) { Write-Host " installate" -ForegroundColor Green } else { Write-Host " NON riuscite" -ForegroundColor Yellow }
 }
 
 Write-Host ""
-Write-Host "Fatto. Halo è pronto: tasto destro su un file > Mostra altre opzioni > Azioni rapide (Halo)." -ForegroundColor Cyan
-Read-Host "Premi Invio per chiudere"
+Write-Host "Fatto. Halo è pronto: Alt+clic su un file, oppure tasto destro > Mostra altre opzioni > Azioni rapide (Halo)." -ForegroundColor Cyan
+if (-not $Silenzioso) { Read-Host "Premi Invio per chiudere" }

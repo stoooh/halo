@@ -1,6 +1,6 @@
 [package]
 name = "halo"
-version = "0.8.1"
+version = "0.9.0"
 description = "Menu radiale per azioni rapide sui file"
 edition = "2021"
 
@@ -30,9 +30,12 @@ tauri-plugin-single-instance = "2"
 # Il PATH aggiornato dal registro (programmi appena installati).
 winreg = "0.55"
 # Alt+clic in Esplora file (altclic_win.rs): aggancio del mouse e selezione delle finestre;
-# la finestra di Halo che ignora il menu di Alt (main.rs).
+# la finestra di Halo che ignora il menu di Alt (main.rs); il pannello «Condividi» (sistema.rs).
 windows = { version = "0.62", features = [
+  "ApplicationModel_DataTransfer", "Foundation_Collections", "Storage", "Storage_Streams",
   "Win32_Foundation", "Win32_Security", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_System_Ole",
   "Win32_System_Threading", "Win32_System_Variant", "Win32_UI_Accessibility", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",
 ] }
+# L'elenco di file passato al pannello «Condividi» (IIterable, usato da windows ma non riesportato).
+windows-collections = "0.3"

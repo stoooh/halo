@@ -17,13 +17,24 @@ nautilus/           voce "Azioni rapide…" nel menu del tasto destro
 
 ## 0. Installazione automatica (consigliata)
 
-Dalla pagina **Releases** del repository scarica, per il tuo sistema:
+Un comando, che scarica l'ultima versione dalla pagina **Releases** e installa tutto da solo:
 
-- **Linux (Ubuntu/GNOME):** `Halo_…_amd64.deb` e `installa-halo.sh` nella stessa cartella, poi
-  `bash installa-halo.sh`. Installa i programmi necessari, la voce del tasto destro di Nautilus e
-  l'Alt+clic (attivo dal prossimo accesso).
-- **Windows 10/11:** `Halo_…_x64-setup.exe`. Alla fine chiede se installare i programmi necessari
-  (con winget, circa 1 GB): rispondi **Sì**.
+- **Linux (Ubuntu/GNOME)**, nel terminale:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/stoooh/halo/main/installa.sh | bash
+  ```
+  Installa il pacchetto con i programmi necessari (chiede la password di amministratore), la voce
+  del tasto destro di Nautilus e l'Alt+clic (attivo dal prossimo accesso).
+- **Windows 10/11**, in PowerShell:
+  ```powershell
+  irm https://raw.githubusercontent.com/stoooh/halo/main/installa.ps1 | iex
+  ```
+  Installa Halo e poi i programmi necessari (`dipendenze.ps1`, circa 1 GB); Windows chiede
+  conferma un paio di volte, per Ghostscript e per l'italiano di Tesseract.
+
+Ciascuno dei due script riconosce il sistema: lanciato su quello sbagliato passa all'altro.
+A mano si può ancora scaricare dalla release `Halo_…_amd64.deb` + `installa-halo.sh`
+(`bash installa-halo.sh`) oppure `Halo_…_x64-setup.exe`.
 
 Gli installer li crea GitHub (`.github/workflows/release.yml`) a ogni tag `v…`.
 
@@ -218,8 +229,9 @@ Lo stesso codice si compila anche per **Windows 10/11**: le differenze (dove sta
 appunti, cestino, notifiche, «Mostra nella cartella») sono tutte in `src-tauri/src/sistema.rs`,
 la configurazione in `src-tauri/tauri.windows.conf.json`.
 
-- **Installer:** `Halo_…_x64-setup.exe` dalla pagina Releases (vedi sopra). Si installa solo per
-  l'utente; alla fine propone di installare i programmi necessari con winget.
+- **Installer:** `installa.ps1` (vedi sopra) oppure `Halo_…_x64-setup.exe` dalla pagina Releases.
+  Si installa solo per l'utente; il setup avviato a mano alla fine propone di installare i
+  programmi necessari, `installa.ps1` li installa senza chiedere.
 - **Menu del tasto destro:** l'installazione aggiunge «Azioni rapide (Halo)» su file, cartelle e
   sfondo delle cartelle (registro, `HKCU\Software\Classes`). Su Windows 11 è in «Mostra altre opzioni».
   Con più file selezionati, Halo li raccoglie in un solo menu.
@@ -227,13 +239,18 @@ la configurazione in `src-tauri/tauri.windows.conf.json`.
   vuoto: la cartella; su uno dei file selezionati: tutti quelli selezionati). Lo ascolta
   `halo --residente`, avviato a ogni accesso (`HKCU\...\CurrentVersion\Run`) e subito dopo
   l'installazione; il codice è in `src-tauri/src/altclic_win.rs`.
-- **Programmi necessari** (una volta, da PowerShell):
-
-```powershell
-winget install ImageMagick.ImageMagick ArtifexSoftware.GhostScript QPDF.QPDF oschwartz10612.Poppler Gyan.FFmpeg 7zip.7zip OliverBetz.ExifTool JohnMacFarlane.Pandoc TheDocumentFoundation.LibreOffice UB-Mannheim.TesseractOCR Python.Python.3.12
-py -m pip install openpyxl msoffcrypto-tool
-```
-
-- **Non ancora disponibili su Windows:** Upscayl (Real-ESRGAN), l'elenco delle app in
-  Condividi (restano Gmail, Link e «Mostra nella cartella»), OCR dei PDF (ocrmypdf).
+- **Programmi necessari:** li installa `dipendenze.ps1` (nella cartella di Halo, lo propone
+  l'installer; si può rilanciare quando vuoi): i programmi con winget, Ghostscript dal sito di
+  Artifex (non è su winget), l'italiano per Tesseract, whisper.cpp in `%LOCALAPPDATA%\Halo\whisper\bin`
+  e le librerie Python `openpyxl msoffcrypto-tool ocrmypdf pillow-heif` (con `pip --user`).
+- **Dove Windows fa diversamente da Ubuntu:**
+  - *Upscayl:* lo stesso Real-ESRGAN nella versione per Windows, incluso nell'installer
+    (`realesrgan\` accanto a `halo.exe`; vedi `risorse/realesrgan/PROVENIENZA.txt`).
+  - *OCR dei PDF:* ocrmypdf da pip, avviato come `py -m ocrmypdf`.
+  - *Converti › HEIC:* heif-enc non c'è per Windows e ImageMagick gli HEIC li legge ma non li
+    scrive: li scrive la libreria Python pillow-heif (stesso codificatore x265).
+  - *Condividi:* le app non hanno file `.desktop`; in fondo all'elenco c'è «Altre app (Condividi
+    di Windows)», il pannello di sistema con WhatsApp, Outlook, Condivisione nelle vicinanze…
+  - *Python* parte con `-E -P -X utf8` invece di `-I`, che escluderebbe le librerie installate con
+    `pip --user`.
 
